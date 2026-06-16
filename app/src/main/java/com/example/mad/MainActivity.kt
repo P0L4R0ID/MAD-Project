@@ -789,6 +789,7 @@ fun LeaveRecordsScreen(currentUserName: String, currentUserRole: UserRole, curre
 
 @Composable
 fun LeaveDetailScreen(record: LeaveApplicationEntity, onBack: () -> Unit) {
+    val context = LocalContext.current
     val typeName = leaveTypes.firstOrNull { it.leaveTypeId == record.leaveTypeId }?.typeName ?: "Leave"
     val statusColor = when(record.status) {
         ApplicationStatus.PENDING -> Color(0xFFE65100)
@@ -832,8 +833,67 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, onBack: () -> Unit) {
         Spacer(Modifier.height(8.dp))
         Text(record.reason, color = Color(0xFF546E7A), lineHeight = 20.sp)
 
+        Spacer(Modifier.height(24.dp))
+
+        // --- NEW: THE ATTACHMENT UI BLOCK ---
+        if (record.attachmentPath != null) {
+            // Extract just the name of the file (e.g. "attachment_12345.pdf")
+            val fileName = java.io.File(record.attachmentPath).name
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Text("ATTACHED FILE:", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(8.dp))
+                    Text("📎", fontSize = 14.sp)
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = fileName,
+                        fontSize = 14.sp,
+                        color = Color(0xFF1C2B36),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        // PLACEHOLDER: Show a popup when clicked
+                        android.widget.Toast.makeText(context, "Opening $fileName...", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DA1F2)), // Nice bright blue
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text("View")
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            androidx.compose.material3.HorizontalDivider(color = Color(0xFFE0E0E0))
+            Spacer(Modifier.height(16.dp))
+        }
+
+        // --- NEW: THE DOWNLOAD PDF BUTTON ---
+        Button(
+            onClick = {
+                // PLACEHOLDER: Show a popup when clicked
+                android.widget.Toast.makeText(context, "Generating PDF...", android.widget.Toast.LENGTH_SHORT).show()
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DA1F2))
+        ) {
+            Text("Download as PDF  ↓", fontWeight = FontWeight.Bold)
+        }
+
+        // Pushes the Back button to the bottom
         Spacer(Modifier.weight(1f))
-        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
+
+        // --- EXISTING BACK BUTTON ---
+        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+            Text("Back")
+        }
     }
 }
 
