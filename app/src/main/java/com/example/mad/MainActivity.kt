@@ -4,7 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +54,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -268,7 +271,11 @@ fun AppRoot() {
                 }
 
                 "detail" -> activeDetailRecord?.let { record ->
-                    LeaveDetailScreen(record = record, onBack = { screen = "records" })
+                    LeaveDetailScreen(
+                        record = record,
+                        userDao = userDao, // <-- Add this new line!
+                        onBack = { screen = "records" }
+                    )
                 }
 
                 "approvals" -> LeaveApprovalsScreen(
@@ -353,14 +360,115 @@ fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForg
 
 @Composable
 fun PasswordRecoveryScreen(onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("Password Recovery", fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField("", {}, label = { Text("Corporate Email") }, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField("", {}, label = { Text("Employee ID") }, modifier = Modifier.fillMaxWidth())
+    // 1. We grab the context HERE, safely inside the Composable!
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    var email by rememberSaveable { mutableStateOf("") }
+    var employeeId by rememberSaveable { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp, vertical = 40.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFF0F0F0))
+                .clickable { onBack() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowLeft,
+                contentDescription = "Back",
+                tint = Color.Black
+            )
+        }
+
+        Spacer(Modifier.height(32.dp))
+
+        Text(
+            text = "Forgot password",
+            fontWeight = FontWeight.Bold,
+            fontSize = 22.sp,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            color = Color.Black
+        )
+
+        Spacer(Modifier.height(24.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = androidx.compose.material3.CardDefaults.cardColors(
+                containerColor = Color(0xFF3B82F6)
+            ),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+        ) {
+            Text(
+                text = "If you have forgotten your password, please submit a request. The system administrator will reset your password and contact you.",
+                color = Color.White,
+                modifier = Modifier.padding(16.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                fontSize = 14.sp
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        Text("Your Company's Email", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF333333))
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = email,
+            onValueChange = { email = it },
+            modifier = Modifier.fillMaxWidth(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+            singleLine = true
+        )
+
         Spacer(Modifier.height(16.dp))
-        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Request Submitted") }
+
+        Text("Employee ID", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF333333))
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = employeeId,
+            onValueChange = { employeeId = it },
+            modifier = Modifier.fillMaxWidth(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+            singleLine = true
+        )
+
+        Spacer(Modifier.height(32.dp))
+
+        Button(
+            onClick = {
+                // 3. We use the safe 'context' variable we created at the top!
+                android.widget.Toast.makeText(context, "Request Submitted!", android.widget.Toast.LENGTH_SHORT).show()
+                onBack()
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF005EB8)
+            ),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
+        ) {
+            Text("Submit Request", color = Color.White, fontWeight = FontWeight.Medium)
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        Text(
+            text = "For urgent access, please contact your HR or system administrator directly.",
+            color = Color.Gray,
+            fontSize = 11.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        )
     }
 }
 
@@ -788,8 +896,15 @@ fun LeaveRecordsScreen(currentUserName: String, currentUserRole: UserRole, curre
 }
 
 @Composable
-fun LeaveDetailScreen(record: LeaveApplicationEntity, onBack: () -> Unit) {
+fun LeaveDetailScreen(record: LeaveApplicationEntity, userDao: UserDao, onBack: () -> Unit) {
     val context = LocalContext.current
+
+    // --- NEW: Fetch the employee's name from the database ---
+    var employeeName by remember(record.employeeId) { mutableStateOf("Loading...") }
+    LaunchedEffect(record.employeeId) {
+        userDao.getUserById(record.employeeId)?.let { employeeName = it.fullName }
+    }
+
     val typeName = leaveTypes.firstOrNull { it.leaveTypeId == record.leaveTypeId }?.typeName ?: "Leave"
     val statusColor = when(record.status) {
         ApplicationStatus.PENDING -> Color(0xFFE65100)
@@ -815,6 +930,14 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, onBack: () -> Unit) {
         }
         Spacer(Modifier.height(24.dp))
 
+        // --- NEW: APPLICANT INFO UI ---
+        Text("APPLICANT", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(employeeName, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF1C2B36))
+        Text("Employee ID: EE-${record.employeeId}", color = Color(0xFF546E7A), fontSize = 14.sp)
+        Spacer(Modifier.height(16.dp))
+        androidx.compose.material3.HorizontalDivider(color = Color(0xFFE0E0E0))
+        Spacer(Modifier.height(16.dp))
+
         Text("LEAVE TYPE", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Text(typeName, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF1C2B36))
         Spacer(Modifier.height(16.dp))
@@ -835,9 +958,8 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, onBack: () -> Unit) {
 
         Spacer(Modifier.height(24.dp))
 
-        // --- NEW: THE ATTACHMENT UI BLOCK ---
+        // --- THE ATTACHMENT UI BLOCK ---
         if (record.attachmentPath != null) {
-            // Extract just the name of the file (e.g. "attachment_12345.pdf")
             val fileName = java.io.File(record.attachmentPath).name
 
             Row(
@@ -861,10 +983,24 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, onBack: () -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 Button(
                     onClick = {
-                        // PLACEHOLDER: Show a popup when clicked
-                        android.widget.Toast.makeText(context, "Opening $fileName...", android.widget.Toast.LENGTH_SHORT).show()
+                        try {
+                            val file = java.io.File(record.attachmentPath)
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.provider",
+                                file
+                            )
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                val mimeType = if (file.name.endsWith(".pdf", true)) "application/pdf" else "image/*"
+                                setDataAndType(uri, mimeType)
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            android.widget.Toast.makeText(context, "Cannot open file.", android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DA1F2)), // Nice bright blue
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DA1F2)),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                 ) {
                     Text("View")
@@ -875,11 +1011,65 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, onBack: () -> Unit) {
             Spacer(Modifier.height(16.dp))
         }
 
-        // --- NEW: THE DOWNLOAD PDF BUTTON ---
+        // --- THE DOWNLOAD PDF BUTTON ---
         Button(
             onClick = {
-                // PLACEHOLDER: Show a popup when clicked
-                android.widget.Toast.makeText(context, "Generating PDF...", android.widget.Toast.LENGTH_SHORT).show()
+                try {
+                    val pdfDocument = android.graphics.pdf.PdfDocument()
+                    val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, 1).create()
+                    val page = pdfDocument.startPage(pageInfo)
+                    val canvas = page.canvas
+
+                    val titlePaint = android.graphics.Paint().apply {
+                        textSize = 24f
+                        isFakeBoldText = true
+                        color = android.graphics.Color.BLACK
+                    }
+                    val textPaint = android.graphics.Paint().apply {
+                        textSize = 16f
+                        color = android.graphics.Color.DKGRAY
+                    }
+
+                    canvas.drawText("LeaveEase Application Report", 50f, 80f, titlePaint)
+                    // We added the employee name to the PDF download here too!
+                    canvas.drawText("Applicant: $employeeName (EE-${record.employeeId})", 50f, 130f, textPaint)
+                    canvas.drawText("Reference ID: #${record.applicationId}", 50f, 170f, textPaint)
+                    canvas.drawText("Leave Type: $typeName", 50f, 210f, textPaint)
+                    canvas.drawText("Status: ${record.status.name}", 50f, 250f, textPaint)
+                    canvas.drawText("Duration: ${record.totalDuration.toInt()} Days", 50f, 290f, textPaint)
+                    canvas.drawText("Reason: ${record.reason}", 50f, 330f, textPaint)
+
+                    pdfDocument.finishPage(page)
+
+                    val fileName = "Leave_Report_${record.applicationId}.pdf"
+
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        val resolver = context.contentResolver
+                        val contentValues = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
+                            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+                        }
+                        val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                        if (uri != null) {
+                            resolver.openOutputStream(uri)?.use { outputStream ->
+                                pdfDocument.writeTo(outputStream)
+                            }
+                        }
+                    } else {
+                        val targetDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+                        val file = java.io.File(targetDir, fileName)
+                        file.outputStream().use { outputStream ->
+                            pdfDocument.writeTo(outputStream)
+                        }
+                    }
+
+                    pdfDocument.close()
+                    android.widget.Toast.makeText(context, "Saved to Downloads folder!", android.widget.Toast.LENGTH_LONG).show()
+
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(context, "Failed to generate PDF.", android.widget.Toast.LENGTH_SHORT).show()
+                }
             },
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DA1F2))
@@ -887,10 +1077,8 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, onBack: () -> Unit) {
             Text("Download as PDF  ↓", fontWeight = FontWeight.Bold)
         }
 
-        // Pushes the Back button to the bottom
         Spacer(Modifier.weight(1f))
 
-        // --- EXISTING BACK BUTTON ---
         Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
             Text("Back")
         }
