@@ -206,17 +206,28 @@ fun AppRoot() {
                 )
 
                 "apply" -> {
-                    // 1. Calculate the user's current exact balance
+                    // Calculate the user's current exact balance
                     val usedPto = recordsList
                         .filter { it.employeeId == currentUser.userId && (it.status == ApplicationStatus.APPROVED || it.status == ApplicationStatus.COMPLETED) }
                         .sumOf { it.totalDuration }
                     val currentBalance = currentUser.ptoBalance - usedPto
 
                     LeaveApplicationScreen(
-                        availableBalance = currentBalance, // Pass the balance into the screen
-                        onSubmit = { leaveType, startMillis, endMillis, reasonText ->
+                        availableBalance = currentBalance,
+                        // Notice the new 'attachedFile' parameter here!
+                        onSubmit = { leaveType, startMillis, endMillis, reasonText, attachedFile ->
                             val newId = (recordsList.maxOfOrNull { it.applicationId } ?: 0) + 1
-                            val newRecord = LeaveApplicationEntity(applicationId = newId, employeeId = currentUser.userId, leaveTypeId = leaveTypes.firstOrNull { it.typeName == leaveType }?.leaveTypeId ?: 1, startDate = startMillis, endDate = endMillis, totalDuration = ((endMillis - startMillis) / 86_400_000L + 1).toDouble(), reason = reasonText, status = ApplicationStatus.PENDING)
+                            val newRecord = LeaveApplicationEntity(
+                                applicationId = newId,
+                                employeeId = currentUser.userId,
+                                leaveTypeId = leaveTypes.firstOrNull { it.typeName == leaveType }?.leaveTypeId ?: 1,
+                                startDate = startMillis,
+                                endDate = endMillis,
+                                totalDuration = ((endMillis - startMillis) / 86_400_000L + 1).toDouble(),
+                                reason = reasonText,
+                                attachmentPath = attachedFile, // <-- Save the file path to the database!
+                                status = ApplicationStatus.PENDING
+                            )
                             scope.launch {
                                 withContext(Dispatchers.IO) { leaveApplicationDao.insertApplication(newRecord) }
                                 screen = "applySuccess"
@@ -563,7 +574,8 @@ fun EditProfileScreen(currentUser: UserEntity, onSave: (String, String, String?)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: String, startMillis: Long, endMillis: Long, reason: String) -> Unit, onBack: () -> Unit) {
+fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: String, startMillis: Long, endMillis: Long, reason: String, attachmentPath: String?) -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
     var selected by rememberSaveable { mutableStateOf(leaveTypes.first().typeName) }
     var expanded by remember { mutableStateOf(false) }
     var start by rememberSaveable { mutableStateOf("") }
@@ -572,6 +584,30 @@ fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: Strin
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
+
+    // NEW: Variables to hold the selected file's info
+    var attachmentName by rememberSaveable { mutableStateOf<String?>(null) }
+    var attachmentPath by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // NEW: The Document Picker Launcher
+    val fileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            attachmentName = "Document Attached" // A simple label for the UI
+
+            // Securely copy the PDF/Image into the app's internal storage
+            val inputStream = context.contentResolver.openInputStream(uri)
+            val file = java.io.File(context.filesDir, "attachment_${System.currentTimeMillis()}.pdf")
+            inputStream?.use { input ->
+                file.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            attachmentPath = file.absolutePath
+        }
+    }
+
     val todayMillis = remember {
         Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
             set(Calendar.HOUR_OF_DAY, 0)
@@ -582,9 +618,7 @@ fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: Strin
     }
     val futureDatesOnly = remember {
         object : androidx.compose.material3.SelectableDates {
-            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
-                return utcTimeMillis >= todayMillis
-            }
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean { return utcTimeMillis >= todayMillis }
         }
     }
 
@@ -608,8 +642,6 @@ fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: Strin
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Leave Application", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-
-        // Show the user their balance before they even apply!
         Text("Available Balance: $availableBalance Days", color = Color(0xFF1976D2), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         Spacer(Modifier.height(12.dp))
 
@@ -620,17 +652,30 @@ fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: Strin
         OutlinedTextField(value = endText, onValueChange = {}, label = { Text("End Date") }, modifier = Modifier.fillMaxWidth(), readOnly = true, trailingIcon = { TextButton(onClick = { showEndPicker = true }) { Text("Pick") } })
 
         if (automatedDays > 0) {
-            // Change color to red if they exceed their balance
             val durationColor = if (automatedDays > availableBalance) Color.Red else Color(0xFF1976D2)
-            Text(
-                text = "Total Duration: $automatedDays Days",
-                fontWeight = FontWeight.Bold,
-                color = durationColor
-            )
+            Text("Total Duration: $automatedDays Days", fontWeight = FontWeight.Bold, color = durationColor)
             Spacer(Modifier.height(12.dp))
         }
 
-        OutlinedTextField(reason, { reason = it }, label = { Text("Reason") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(reason, { reason = it }, label = { Text("Reason") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+        Spacer(Modifier.height(12.dp))
+
+        // NEW: The File Upload UI block
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = attachmentName ?: "",
+                onValueChange = {},
+                placeholder = { Text("Pdf, Png, Jpg files (Optional)") },
+                modifier = Modifier.weight(1f),
+                readOnly = true
+            )
+            Button(
+                onClick = { fileLauncher.launch("*/*") }, // "*/*" allows picking PDFs and Images
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)) // Green button
+            ) {
+                Text("Upload")
+            }
+        }
         Spacer(Modifier.height(12.dp))
 
         error?.let { Text(it, color = Color.Red) }
@@ -640,8 +685,6 @@ fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: Strin
             onClick = {
                 val s = start.toLongOrNull()
                 val e = end.toLongOrNull()
-
-                // OUR NEW VALIDATION RULES
                 error = when {
                     s == null || e == null -> "Please enter valid dates."
                     s > e -> "Start date cannot be later than end date."
@@ -650,7 +693,8 @@ fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: Strin
                     else -> null
                 }
 
-                if (error == null) onSubmit(selected, s!!, e!!, reason)
+                // Pass the attachmentPath into the submit function!
+                if (error == null) onSubmit(selected, s!!, e!!, reason, attachmentPath)
             },
             modifier = Modifier.fillMaxWidth()
         ) {
