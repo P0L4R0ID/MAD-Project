@@ -42,6 +42,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -109,7 +110,7 @@ fun AppRoot() {
     var screen by rememberSaveable { mutableStateOf("login") }
     var activeRejectRecord by remember { mutableStateOf<LeaveApplicationEntity?>(null) }
     var activeDetailRecord by remember { mutableStateOf<LeaveApplicationEntity?>(null) }
-    val recordsList = remember { mutableStateListOf<LeaveApplicationEntity>() }
+    val recordsList by leaveApplicationDao.getAllApplicationsLive().collectAsState(initial = emptyList())
     var loginError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -127,13 +128,6 @@ fun AppRoot() {
 
             // 2. ADD THIS NEW LINE: Run the automated status sweep!
             leaveApplicationDao.autoCompletePastLeaves(System.currentTimeMillis())
-
-            // 3. Fetch the freshly updated data for the screen
-            val freshData = leaveApplicationDao.getAllApplicationsNewestFirst()
-            withContext(Dispatchers.Main) {
-                recordsList.clear()
-                recordsList.addAll(freshData)
-            }
         }
     }
 
@@ -171,36 +165,145 @@ fun AppRoot() {
     ) { padding ->
         Box(Modifier.padding(padding)) {
             when (screen) {
-                "login" -> LoginScreen(errorMessage = loginError, onLogin = { inputUser, inputPass -> scope.launch { val user = withContext(Dispatchers.IO) { userDao.getUserByUserName(inputUser) }; if (user != null && user.password == inputPass) { currentUser = user; loginError = null; screen = "dashboard" } else { loginError = "Invalid username or password" } } }, onForgotPassword = { screen = "recovery" })
+                "login" -> LoginScreen(
+                    errorMessage = loginError,
+                    onLogin = { inputUser, inputPass ->
+                        scope.launch {
+                            val user =
+                                withContext(Dispatchers.IO) { userDao.getUserByUserName(inputUser) }; if (user != null && user.password == inputPass) {
+                            currentUser = user; loginError = null; screen = "dashboard"
+                        } else {
+                            loginError = "Invalid username or password"
+                        }
+                        }
+                    },
+                    onForgotPassword = { screen = "recovery" })
+
                 "recovery" -> PasswordRecoveryScreen(onBack = { screen = "login" })
-                "dashboard" -> EmployeeProfileScreen(userName = currentUser.fullName, userId = currentUser.userId, records = recordsList, onApply = { screen = "apply" }, onEdit = { screen = "edit" }, onRecords = { screen = "records" })
+                "dashboard" -> EmployeeProfileScreen(
+                    userName = currentUser.fullName,
+                    userId = currentUser.userId,
+                    basePto = currentUser.ptoBalance, // <-- We pass the 15.0 from the database here
+                    records = recordsList,
+                    onApply = { screen = "apply" },
+                    onEdit = { screen = "edit" },
+                    onRecords = { screen = "records" }
+                )
+
                 "edit" -> EditProfileScreen(
                     currentUser = currentUser,
                     onSave = { updatedName, updatedPhone, updatedPhotoPath ->
                         scope.launch {
                             withContext(Dispatchers.IO) {
                                 val existing = userDao.getUserById(currentUser.userId) ?: return@withContext
-                                userDao.insertUser(existing.copy(fullName = updatedName, phoneNumber = updatedPhone, profilePicture = updatedPhotoPath))
+                                // Now it safely edits the row without triggering the CASCADE delete!
+                                userDao.updateUser(existing.copy(fullName = updatedName, phoneNumber = updatedPhone, profilePicture = updatedPhotoPath))
                             }
                             currentUser = currentUser.copy(fullName = updatedName, phoneNumber = updatedPhone, profilePicture = updatedPhotoPath)
                         }
                     },
                     onLogout = { screen = "login" }
                 )
-                "apply" -> LeaveApplicationScreen(onSubmit = { leaveType, startMillis, endMillis, reasonText -> val newId = (recordsList.maxOfOrNull { it.applicationId } ?: 0) + 1; val newRecord = LeaveApplicationEntity(applicationId = newId, employeeId = currentUser.userId, leaveTypeId = leaveTypes.firstOrNull { it.typeName == leaveType }?.leaveTypeId ?: 1, startDate = startMillis, endDate = endMillis, totalDuration = ((endMillis - startMillis) / 86_400_000L + 1).toDouble(), reason = reasonText, status = ApplicationStatus.PENDING); scope.launch { withContext(Dispatchers.IO) { leaveApplicationDao.insertApplication(newRecord) }; recordsList.add(0, newRecord); screen = "applySuccess" } }, onBack = { screen = "dashboard" })
-                "applySuccess" -> SuccessDialogScreen(message = "Success! Application delivered.", onDone = { screen = "records" })
-                "records" -> {
-                    val visibleRecords = recordsList.filter { it.employeeId == currentUser.userId || currentUser.role == UserRole.MANAGER }
-                    LeaveRecordsScreen(currentUserName = currentUser.fullName, currentUserRole = currentUser.role, currentUserId = currentUser.userId, allRecords = visibleRecords, onWithdraw = { recordToWithdraw -> scope.launch { withContext(Dispatchers.IO) { leaveApplicationDao.deleteApplication(recordToWithdraw.applicationId) }; recordsList.remove(recordToWithdraw) } }, onBack = { screen = "dashboard" }, onRecordClick = { record ->
-                        activeDetailRecord = record
-                        screen = "detail"
-                    })
+
+                "apply" -> {
+                    // 1. Calculate the user's current exact balance
+                    val usedPto = recordsList
+                        .filter { it.employeeId == currentUser.userId && (it.status == ApplicationStatus.APPROVED || it.status == ApplicationStatus.COMPLETED) }
+                        .sumOf { it.totalDuration }
+                    val currentBalance = currentUser.ptoBalance - usedPto
+
+                    LeaveApplicationScreen(
+                        availableBalance = currentBalance, // Pass the balance into the screen
+                        onSubmit = { leaveType, startMillis, endMillis, reasonText ->
+                            val newId = (recordsList.maxOfOrNull { it.applicationId } ?: 0) + 1
+                            val newRecord = LeaveApplicationEntity(applicationId = newId, employeeId = currentUser.userId, leaveTypeId = leaveTypes.firstOrNull { it.typeName == leaveType }?.leaveTypeId ?: 1, startDate = startMillis, endDate = endMillis, totalDuration = ((endMillis - startMillis) / 86_400_000L + 1).toDouble(), reason = reasonText, status = ApplicationStatus.PENDING)
+                            scope.launch {
+                                withContext(Dispatchers.IO) { leaveApplicationDao.insertApplication(newRecord) }
+                                screen = "applySuccess"
+                            }
+                        },
+                        onBack = { screen = "dashboard" }
+                    )
                 }
+
+                "applySuccess" -> SuccessDialogScreen(
+                    message = "Success! Application delivered.",
+                    onDone = { screen = "records" })
+
+                "records" -> {
+                    val visibleRecords =
+                        recordsList.filter { it.employeeId == currentUser.userId || currentUser.role == UserRole.MANAGER }
+                    LeaveRecordsScreen(
+                        currentUserName = currentUser.fullName,
+                        currentUserRole = currentUser.role,
+                        currentUserId = currentUser.userId,
+                        allRecords = visibleRecords,
+                        onWithdraw = { recordToWithdraw ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    leaveApplicationDao.deleteApplication(
+                                        recordToWithdraw.applicationId
+                                    )
+                                }
+                                // Removed the recordsList.remove() - Flow handles it!
+                            }
+                        },
+                        onBack = { screen = "dashboard" },
+                        onRecordClick = { record ->
+                            activeDetailRecord = record
+                            screen = "detail"
+                        }
+                    )
+                }
+
                 "detail" -> activeDetailRecord?.let { record ->
                     LeaveDetailScreen(record = record, onBack = { screen = "records" })
                 }
-                "approvals" -> LeaveApprovalsScreen(records = recordsList, userDao = userDao, onNavigateToReject = { record -> activeRejectRecord = record; screen = "reject" }, onApprove = { record -> scope.launch { withContext(Dispatchers.IO) { leaveApplicationDao.updateApplicationStatus(applicationId = record.applicationId, status = ApplicationStatus.APPROVED, managerId = currentUser.userId, actionDate = System.currentTimeMillis(), rejectReason = null) }; withContext(Dispatchers.Main) { recordsList.clear(); recordsList.addAll(withContext(Dispatchers.IO) { leaveApplicationDao.getAllApplicationsNewestFirst() }) } } }, onBack = { screen = "dashboard" })
-                "reject" -> RejectRequestScreen(onCancel = { screen = "approvals" }, onSubmit = { reasonString -> activeRejectRecord?.let { record -> scope.launch { withContext(Dispatchers.IO) { leaveApplicationDao.updateApplicationStatus(record.applicationId, ApplicationStatus.REJECTED, currentUser.userId, System.currentTimeMillis(), reasonString) }; withContext(Dispatchers.Main) { recordsList.clear(); recordsList.addAll(withContext(Dispatchers.IO) { leaveApplicationDao.getAllApplicationsNewestFirst() }) } } }; activeRejectRecord = null; screen = "approvals" })
+
+                "approvals" -> LeaveApprovalsScreen(
+                    records = recordsList,
+                    userDao = userDao,
+                    onNavigateToReject = { record ->
+                        activeRejectRecord = record; screen = "reject"
+                    },
+                    onApprove = { record ->
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                leaveApplicationDao.updateApplicationStatus(
+                                    applicationId = record.applicationId,
+                                    status = ApplicationStatus.APPROVED,
+                                    managerId = currentUser.userId,
+                                    actionDate = System.currentTimeMillis(),
+                                    rejectReason = null
+                                )
+                            }
+                            // Removed recordsList.clear() and addAll() - Flow handles it!
+                        }
+                    },
+                    onBack = { screen = "dashboard" }
+                )
+
+                "reject" -> RejectRequestScreen(
+                    onCancel = { screen = "approvals" },
+                    onSubmit = { reasonString ->
+                        activeRejectRecord?.let { record ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    leaveApplicationDao.updateApplicationStatus(
+                                        record.applicationId,
+                                        ApplicationStatus.REJECTED,
+                                        currentUser.userId,
+                                        System.currentTimeMillis(),
+                                        reasonString
+                                    )
+                                }
+                                // Removed recordsList.clear() and addAll() - Flow handles it!
+                            }
+                        }
+                        activeRejectRecord = null
+                        screen = "approvals"
+                    }
+                )
             }
         }
     }
@@ -217,7 +320,18 @@ fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForg
         Spacer(Modifier.height(20.dp))
         OutlinedTextField(username, { username = it }, label = { Text("Username") }, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
-        OutlinedTextField(password, { password = it }, label = { Text("Password") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("Password") },
+            modifier = Modifier.fillMaxWidth(),
+            // This line turns the text into secure dots!
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            // This tells the phone keyboard to turn off autocorrect
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.Password
+            )
+        )
         Spacer(Modifier.height(8.dp))
         errorMessage?.let { Text(it, color = Color.Red, fontWeight = FontWeight.Medium) }
         Spacer(Modifier.height(16.dp))
@@ -270,8 +384,12 @@ fun LeaveEaseTopBar(currentUser: UserEntity) {
 }
 
 @Composable
-fun EmployeeProfileScreen(userName: String, userId: Int, records: List<LeaveApplicationEntity>, onApply: () -> Unit, onEdit: () -> Unit, onRecords: () -> Unit) {
-    val balance = 15.0
+fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, records: List<LeaveApplicationEntity>, onApply: () -> Unit, onEdit: () -> Unit, onRecords: () -> Unit) {
+    val usedPto = records
+        .filter { it.employeeId == userId && (it.status == ApplicationStatus.APPROVED || it.status == ApplicationStatus.COMPLETED) }
+        .sumOf { it.totalDuration }
+
+    val balance = basePto - usedPto
 
     val upcomingLeaves = records
         .filter { it.employeeId == userId && it.status == ApplicationStatus.APPROVED && it.endDate >= System.currentTimeMillis() }
@@ -445,7 +563,7 @@ fun EditProfileScreen(currentUser: UserEntity, onSave: (String, String, String?)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LeaveApplicationScreen(onSubmit: (leaveType: String, startMillis: Long, endMillis: Long, reason: String) -> Unit, onBack: () -> Unit) {
+fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: String, startMillis: Long, endMillis: Long, reason: String) -> Unit, onBack: () -> Unit) {
     var selected by rememberSaveable { mutableStateOf(leaveTypes.first().typeName) }
     var expanded by remember { mutableStateOf(false) }
     var start by rememberSaveable { mutableStateOf("") }
@@ -470,7 +588,6 @@ fun LeaveApplicationScreen(onSubmit: (leaveType: String, startMillis: Long, endM
         }
     }
 
-    // 3. Attach the rule to both of your calendars!
     val startPickerState = rememberDatePickerState(selectableDates = futureDatesOnly)
     val endPickerState = rememberDatePickerState(selectableDates = futureDatesOnly)
     val startText = start.toLongOrNull()?.let { formatDate(it) }.orEmpty()
@@ -480,7 +597,6 @@ fun LeaveApplicationScreen(onSubmit: (leaveType: String, startMillis: Long, endM
         val sMillis = start.toLongOrNull()
         val eMillis = end.toLongOrNull()
         if (sMillis != null && eMillis != null && sMillis <= eMillis) {
-            // 86,400,000 is the number of milliseconds in one day
             ((eMillis - sMillis) / 86_400_000L + 1).toInt()
         } else {
             0
@@ -489,27 +605,57 @@ fun LeaveApplicationScreen(onSubmit: (leaveType: String, startMillis: Long, endM
 
     if (showStartPicker) { DatePickerDialog(onDismissRequest = { showStartPicker = false }, confirmButton = { TextButton(onClick = { startPickerState.selectedDateMillis?.let { start = it.toString() }; showStartPicker = false }) { Text("OK") } }, dismissButton = { TextButton(onClick = { showStartPicker = false }) { Text("Cancel") } }) { DatePicker(state = startPickerState) } }
     if (showEndPicker) { DatePickerDialog(onDismissRequest = { showEndPicker = false }, confirmButton = { TextButton(onClick = { endPickerState.selectedDateMillis?.let { end = it.toString() }; showEndPicker = false }) { Text("OK") } }, dismissButton = { TextButton(onClick = { showEndPicker = false }) { Text("Cancel") } }) { DatePicker(state = endPickerState) } }
+
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Leave Application", fontWeight = FontWeight.Bold)
+        Text("Leave Application", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+
+        // Show the user their balance before they even apply!
+        Text("Available Balance: $availableBalance Days", color = Color(0xFF1976D2), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         Spacer(Modifier.height(12.dp))
+
         Box { OutlinedTextField(selected, {}, label = { Text("Leave Type") }, modifier = Modifier.fillMaxWidth(), readOnly = true, trailingIcon = { TextButton(onClick = { expanded = true }) { Text("▼") } }); DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) { leaveTypes.forEach { type -> DropdownMenuItem(text = { Text(type.typeName) }, onClick = { selected = type.typeName; expanded = false }) } } }
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(value = startText, onValueChange = {}, label = { Text("Start Date") }, modifier = Modifier.fillMaxWidth(), readOnly = true, trailingIcon = { TextButton(onClick = { showStartPicker = true }) { Text("Pick") } })
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(value = endText, onValueChange = {}, label = { Text("End Date") }, modifier = Modifier.fillMaxWidth(), readOnly = true, trailingIcon = { TextButton(onClick = { showEndPicker = true }) { Text("Pick") } })
+
         if (automatedDays > 0) {
+            // Change color to red if they exceed their balance
+            val durationColor = if (automatedDays > availableBalance) Color.Red else Color(0xFF1976D2)
             Text(
                 text = "Total Duration: $automatedDays Days",
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF1976D2) // A nice professional blue
+                color = durationColor
             )
             Spacer(Modifier.height(12.dp))
         }
+
         OutlinedTextField(reason, { reason = it }, label = { Text("Reason") }, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
+
         error?.let { Text(it, color = Color.Red) }
         Spacer(Modifier.height(12.dp))
-        Button(onClick = { val s = start.toLongOrNull(); val e = end.toLongOrNull(); error = when { s == null || e == null -> "Please enter valid dates."; s > e -> "Start date cannot be later than end date."; reason.isBlank() -> "Reason is required."; else -> null }; if (error == null) onSubmit(selected, s!!, e!!, reason) }, modifier = Modifier.fillMaxWidth()) { Text("Submit Application") }
+
+        Button(
+            onClick = {
+                val s = start.toLongOrNull()
+                val e = end.toLongOrNull()
+
+                // OUR NEW VALIDATION RULES
+                error = when {
+                    s == null || e == null -> "Please enter valid dates."
+                    s > e -> "Start date cannot be later than end date."
+                    automatedDays > availableBalance -> "Cannot apply: Duration ($automatedDays days) exceeds your balance ($availableBalance days)."
+                    reason.isBlank() -> "Reason is required."
+                    else -> null
+                }
+
+                if (error == null) onSubmit(selected, s!!, e!!, reason)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Submit Application")
+        }
         TextButton(onClick = onBack) { Text("Back") }
     }
 }

@@ -140,6 +140,9 @@ interface UserDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertUsers(users: List<UserEntity>): List<Long>
 
+    @androidx.room.Update
+    suspend fun updateUser(user: UserEntity)
+
     @Query("SELECT * FROM user WHERE userId = :userId LIMIT 1")
     suspend fun getUserById(userId: Int): UserEntity?
 
@@ -233,6 +236,10 @@ interface LeaveApplicationDao {
 
     @Query("DELETE FROM leave_application WHERE applicationId = :applicationId")
     suspend fun deleteApplication(applicationId: Int)
+
+    @Query("SELECT * FROM leave_application ORDER BY startDate DESC, applicationId DESC")
+    fun getAllApplicationsLive(): kotlinx.coroutines.flow.Flow<List<LeaveApplicationEntity>>
+
 }
 
 /**
