@@ -149,6 +149,7 @@ fun AppRoot() {
             }
 
             leaveApplicationDao.autoCompletePastLeaves(System.currentTimeMillis())
+
         }
     }
 
@@ -1558,6 +1559,7 @@ fun LeaveRecordsScreen(
 fun LeaveDetailScreen(record: LeaveApplicationEntity, userDao: UserDao, onBack: () -> Unit) {
     val context = LocalContext.current
 
+    // Fetch the employee's name from the database
     var employeeName by remember(record.employeeId) { mutableStateOf("Loading...") }
     LaunchedEffect(record.employeeId) {
         userDao.getUserById(record.employeeId)?.let { employeeName = it.fullName }
@@ -1568,173 +1570,218 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, userDao: UserDao, onBack: 
         ApplicationStatus.PENDING -> Color(0xFFE65100)
         ApplicationStatus.APPROVED -> Color(0xFF1B5E20)
         ApplicationStatus.REJECTED -> Color(0xFFB71C1C)
-        ApplicationStatus.COMPLETED -> Color(0xFF8C8C8C)
+        ApplicationStatus.COMPLETED -> Color(0xFF616161)
     }
     val statusBg = when(record.status) {
         ApplicationStatus.PENDING -> Color(0xFFFFE0B2)
         ApplicationStatus.APPROVED -> Color(0xFFC8E6C9)
         ApplicationStatus.REJECTED -> Color(0xFFFFCDD2)
-        ApplicationStatus.COMPLETED -> Color(0xFF8C8C8C)
+        ApplicationStatus.COMPLETED -> Color(0xFFEEEEEE)
     }
 
+    // --- OUTER WRAPPER (Holds everything) ---
     Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text("Leave Application Detail", fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.align(Alignment.CenterHorizontally), color = Color(0xFF1C2B36))
-        Spacer(Modifier.height(24.dp))
 
-        Surface(Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp), color = statusBg) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(16.dp)) {
-                Text(record.status.name, color = statusColor, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+        // --- INNER SCROLLABLE CONTENT ---
+        // The weight(1f) makes this take up all available space, pushing the Back button to the very bottom.
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text("Leave Application Detail", fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.align(Alignment.CenterHorizontally), color = Color(0xFF1C2B36))
+            Spacer(Modifier.height(24.dp))
+
+            Surface(Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp), color = statusBg) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(16.dp)) {
+                    Text(record.status.name, color = statusColor, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                }
             }
-        }
-        Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(24.dp))
 
-        Text("APPLICANT", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        Text(employeeName, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF1C2B36))
-        Text("Employee ID: EE-${record.employeeId}", color = Color(0xFF546E7A), fontSize = 14.sp)
-        Spacer(Modifier.height(16.dp))
-        androidx.compose.material3.HorizontalDivider(color = Color(0xFFE0E0E0))
-        Spacer(Modifier.height(16.dp))
+            Text("APPLICANT", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text(employeeName, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF1C2B36))
+            Text("Employee ID: EE-${record.employeeId}", color = Color(0xFF546E7A), fontSize = 14.sp)
+            Spacer(Modifier.height(16.dp))
+            androidx.compose.material3.HorizontalDivider(color = Color(0xFFE0E0E0))
+            Spacer(Modifier.height(16.dp))
 
-        Text("LEAVE TYPE", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        Text(typeName, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF1C2B36))
-        Spacer(Modifier.height(16.dp))
+            Text("LEAVE TYPE", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text(typeName, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF1C2B36))
+            Spacer(Modifier.height(16.dp))
 
-        Text("${formatDate(record.startDate)} - ${formatDate(record.endDate)}", color = Color(0xFF1C2B36), fontSize = 16.sp)
-        Spacer(Modifier.height(4.dp))
-        Row {
-            Text("Leave Period: ", fontWeight = FontWeight.Bold, color = Color(0xFF1C2B36))
-            Text("${record.totalDuration.toInt()} Days", color = Color(0xFF546E7A))
-        }
-        Spacer(Modifier.height(16.dp))
-        androidx.compose.material3.HorizontalDivider(color = Color(0xFFE0E0E0))
-        Spacer(Modifier.height(16.dp))
-
-        Text("REASON", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text(record.reason, color = Color(0xFF546E7A), lineHeight = 20.sp)
-
-        Spacer(Modifier.height(24.dp))
-
-        if (record.attachmentPath != null) {
-            val fileName = java.io.File(record.attachmentPath).name
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    Text("ATTACHED FILE:", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.width(8.dp))
-                    Text("📎", fontSize = 14.sp)
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = fileName,
-                        fontSize = 14.sp,
-                        color = Color(0xFF1C2B36),
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    onClick = {
-                        try {
-                            val file = java.io.File(record.attachmentPath)
-                            val uri = androidx.core.content.FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.provider",
-                                file
-                            )
-                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                                val mimeType = if (file.name.endsWith(".pdf", true)) "application/pdf" else "image/*"
-                                setDataAndType(uri, mimeType)
-                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            android.widget.Toast.makeText(context, "Cannot open file.", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DA1F2)),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Text("View")
-                }
+            Text("${formatDate(record.startDate)} - ${formatDate(record.endDate)}", color = Color(0xFF1C2B36), fontSize = 16.sp)
+            Spacer(Modifier.height(4.dp))
+            Row {
+                Text("Leave Period: ", fontWeight = FontWeight.Bold, color = Color(0xFF1C2B36))
+                Text("${record.totalDuration.toInt()} Days", color = Color(0xFF546E7A))
             }
             Spacer(Modifier.height(16.dp))
             androidx.compose.material3.HorizontalDivider(color = Color(0xFFE0E0E0))
             Spacer(Modifier.height(16.dp))
-        }
 
-        Button(
-            onClick = {
-                try {
-                    val pdfDocument = android.graphics.pdf.PdfDocument()
-                    val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, 1).create()
-                    val page = pdfDocument.startPage(pageInfo)
-                    val canvas = page.canvas
+            Text("REASON", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text(record.reason, color = Color(0xFF546E7A), lineHeight = 20.sp)
 
-                    val titlePaint = android.graphics.Paint().apply {
-                        textSize = 24f
-                        isFakeBoldText = true
-                        color = android.graphics.Color.BLACK
-                    }
-                    val textPaint = android.graphics.Paint().apply {
-                        textSize = 16f
-                        color = android.graphics.Color.DKGRAY
-                    }
-
-                    canvas.drawText("LeaveEase Application Report", 50f, 80f, titlePaint)
-                    canvas.drawText("Applicant: $employeeName (EE-${record.employeeId})", 50f, 130f, textPaint)
-                    canvas.drawText("Reference ID: #${record.applicationId}", 50f, 170f, textPaint)
-                    canvas.drawText("Leave Type: $typeName", 50f, 210f, textPaint)
-                    canvas.drawText("Status: ${record.status.name}", 50f, 250f, textPaint)
-                    canvas.drawText("Duration: ${record.totalDuration.toInt()} Days", 50f, 290f, textPaint)
-                    canvas.drawText("Reason: ${record.reason}", 50f, 330f, textPaint)
-
-                    pdfDocument.finishPage(page)
-
-                    val fileName = "Leave_Report_${record.applicationId}.pdf"
-
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                        val resolver = context.contentResolver
-                        val contentValues = android.content.ContentValues().apply {
-                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
-                            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+            if (record.status == ApplicationStatus.REJECTED && !record.rejectReason.isNullOrBlank()) {
+                Spacer(Modifier.height(16.dp))
+                Surface(
+                    color = Color(0xFFFFEBEE),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Rejected Note",
+                            tint = Color(0xFFC62828),
+                            modifier = Modifier.size(20.dp).padding(top = 2.dp)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("Manager's Rejection Note", color = Color(0xFFC62828), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(4.dp))
+                            Text(record.rejectReason!!, color = Color(0xFFC62828), fontSize = 14.sp, lineHeight = 20.sp)
                         }
-                        val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                        if (uri != null) {
-                            resolver.openOutputStream(uri)?.use { outputStream ->
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            if (record.attachmentPath != null) {
+                val fileName = java.io.File(record.attachmentPath).name
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Text("ATTACHED FILE:", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(8.dp))
+                        Text("📎", fontSize = 14.sp)
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = fileName,
+                            fontSize = 14.sp,
+                            color = Color(0xFF1C2B36),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            try {
+                                val file = java.io.File(record.attachmentPath)
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.provider",
+                                    file
+                                )
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                    val mimeType = if (file.name.endsWith(".pdf", true)) "application/pdf" else "image/*"
+                                    setDataAndType(uri, mimeType)
+                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Cannot open file.", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DA1F2)),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text("View")
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                androidx.compose.material3.HorizontalDivider(color = Color(0xFFE0E0E0))
+                Spacer(Modifier.height(16.dp))
+            }
+
+            Button(
+                onClick = {
+                    try {
+                        val pdfDocument = android.graphics.pdf.PdfDocument()
+                        val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, 1).create()
+                        val page = pdfDocument.startPage(pageInfo)
+                        val canvas = page.canvas
+
+                        val titlePaint = android.graphics.Paint().apply {
+                            textSize = 24f
+                            isFakeBoldText = true
+                            color = android.graphics.Color.BLACK
+                        }
+                        val textPaint = android.graphics.Paint().apply {
+                            textSize = 16f
+                            color = android.graphics.Color.DKGRAY
+                        }
+
+                        canvas.drawText("LeaveEase Application Report", 50f, 80f, titlePaint)
+                        canvas.drawText("Applicant: $employeeName (EE-${record.employeeId})", 50f, 130f, textPaint)
+                        canvas.drawText("Reference ID: #${record.applicationId}", 50f, 170f, textPaint)
+                        canvas.drawText("Leave Type: $typeName", 50f, 210f, textPaint)
+                        canvas.drawText("Status: ${record.status.name}", 50f, 250f, textPaint)
+                        canvas.drawText("Duration: ${record.totalDuration.toInt()} Days", 50f, 290f, textPaint)
+                        canvas.drawText("Reason: ${record.reason}", 50f, 330f, textPaint)
+
+                        if (record.status == ApplicationStatus.REJECTED && !record.rejectReason.isNullOrBlank()) {
+                            canvas.drawText("Manager's Note: ${record.rejectReason}", 50f, 370f, textPaint)
+                        }
+
+                        pdfDocument.finishPage(page)
+
+                        val pdfFileName = "Leave_Report_${record.applicationId}.pdf"
+
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            val resolver = context.contentResolver
+                            val contentValues = android.content.ContentValues().apply {
+                                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, pdfFileName)
+                                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
+                                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+                            }
+                            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                            if (uri != null) {
+                                resolver.openOutputStream(uri)?.use { outputStream ->
+                                    pdfDocument.writeTo(outputStream)
+                                }
+                            }
+                        } else {
+                            val targetDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+                            val file = java.io.File(targetDir, pdfFileName)
+                            file.outputStream().use { outputStream ->
                                 pdfDocument.writeTo(outputStream)
                             }
                         }
-                    } else {
-                        val targetDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
-                        val file = java.io.File(targetDir, fileName)
-                        file.outputStream().use { outputStream ->
-                            pdfDocument.writeTo(outputStream)
-                        }
+
+                        pdfDocument.close()
+                        android.widget.Toast.makeText(context, "Saved to Downloads folder!", android.widget.Toast.LENGTH_LONG).show()
+
+                    } catch (e: Exception) {
+                        android.widget.Toast.makeText(context, "Failed to generate PDF.", android.widget.Toast.LENGTH_SHORT).show()
                     }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DA1F2))
+            ) {
+                Text("Download as PDF  ↓", fontWeight = FontWeight.Bold)
+            }
 
-                    pdfDocument.close()
-                    android.widget.Toast.makeText(context, "Saved to Downloads folder!", android.widget.Toast.LENGTH_LONG).show()
-
-                } catch (e: Exception) {
-                    android.widget.Toast.makeText(context, "Failed to generate PDF.", android.widget.Toast.LENGTH_SHORT).show()
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DA1F2))
-        ) {
-            Text("Download as PDF  ↓", fontWeight = FontWeight.Bold)
+            // Added a little padding at the very bottom of the scroll area
+            Spacer(Modifier.height(16.dp))
         }
 
-        Spacer(Modifier.weight(1f))
-
-        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-            Text("Back")
+        // --- STICKY BACK BUTTON ---
+        Spacer(Modifier.height(16.dp)) // Separation between scroll area and button
+        Button(
+            onClick = onBack,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE0E0E0)) // Light gray to show it's a secondary action
+        ) {
+            Text("Back", color = Color.DarkGray, fontWeight = FontWeight.Medium)
         }
     }
 }
