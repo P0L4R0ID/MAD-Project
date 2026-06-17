@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,7 +21,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Button
@@ -61,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mad.data.*
@@ -83,7 +87,21 @@ private fun daysFromNow(days: Int): Long = Calendar.getInstance().apply { add(Ca
 private val seedApplications = listOf(
     LeaveApplicationEntity(1, 101, 1, daysFromNow(4), daysFromNow(7), 4.0, "Family vacation", status = ApplicationStatus.PENDING),
     LeaveApplicationEntity(2, 101, 2, daysFromNow(-10), daysFromNow(-8), 3.0, "Clinic follow-up", status = ApplicationStatus.APPROVED, managerId = 201, approvalDate = daysFromNow(-9)),
-    LeaveApplicationEntity(3, 103, 3, daysFromNow(-2), daysFromNow(0), 3.0, "Insufficient documentation provided.", status = ApplicationStatus.REJECTED, managerId = 201, approvalDate = daysFromNow(-1), rejectReason = "Please attach formal clinic slip.")
+    LeaveApplicationEntity(3, 103, 3, daysFromNow(-2), daysFromNow(0), 3.0, "Insufficient documentation provided.", status = ApplicationStatus.REJECTED, managerId = 201, approvalDate = daysFromNow(-1), rejectReason = "Please attach formal clinic slip."),
+
+    // --- NEW: Manually injected COMPLETED past application! ---
+    LeaveApplicationEntity(
+        applicationId = 4,
+        employeeId = 101, // 101 is Sarah's ID
+        leaveTypeId = 1, // Annual Leave
+        startDate = daysFromNow(-40), // 40 days ago
+        endDate = daysFromNow(-35), // 35 days ago
+        totalDuration = 6.0,
+        reason = "Holiday trip to Tokyo",
+        status = ApplicationStatus.COMPLETED, // Hardcoded as completed
+        managerId = 201,
+        approvalDate = daysFromNow(-45)
+    )
 )
 
 class MainActivity : ComponentActivity() {
@@ -111,7 +129,7 @@ fun AppRoot() {
         )
     }
     var currentUser by remember { mutableStateOf(testAccounts.first()) }
-    var screen by rememberSaveable { mutableStateOf("login") }
+    var screen by rememberSaveable { mutableStateOf("splash") }
     var activeRejectRecord by remember { mutableStateOf<LeaveApplicationEntity?>(null) }
     var activeDetailRecord by remember { mutableStateOf<LeaveApplicationEntity?>(null) }
     val recordsList by leaveApplicationDao.getAllApplicationsLive().collectAsState(initial = emptyList())
@@ -130,12 +148,30 @@ fun AppRoot() {
                 try { leaveApplicationDao.insertApplications(seedApplications) } catch (_: Exception) {}
             }
 
-            // 2. ADD THIS NEW LINE: Run the automated status sweep!
+            // 2. Automated status sweep
             leaveApplicationDao.autoCompletePastLeaves(System.currentTimeMillis())
+
+            // --- 3. THE FIX: Forcefully inject the Tokyo trip! ---
+            try {
+                leaveApplicationDao.insertApplication(
+                    LeaveApplicationEntity(
+                        applicationId = 99, // Using 99 so it doesn't clash with existing IDs
+                        employeeId = 101, // Sarah's ID
+                        leaveTypeId = 1,
+                        startDate = daysFromNow(-40),
+                        endDate = daysFromNow(-35),
+                        totalDuration = 6.0,
+                        reason = "Holiday trip to Tokyo",
+                        status = ApplicationStatus.COMPLETED,
+                        managerId = 201,
+                        approvalDate = daysFromNow(-45)
+                    )
+                )
+            } catch (_: Exception) {}
         }
     }
 
-    val showBottomBar = screen != "login" && screen != "recovery" && screen != "recoverySuccess"
+    val showBottomBar = screen != "splash" && screen != "login" && screen != "recovery" && screen != "recoverySuccess"
     val bottomItems = remember(currentUser.role) {
         if (currentUser.role == UserRole.MANAGER) {
             listOf(
@@ -169,6 +205,10 @@ fun AppRoot() {
     ) { padding ->
         Box(Modifier.padding(padding)) {
             when (screen) {
+                "splash" -> SplashScreen(
+                    onTimeout = { screen = "login" } // Automatically routes to login after 1 second!
+                )
+
                 "login" -> LoginScreen(
                     errorMessage = loginError,
                     onLogin = { inputUser, inputPass ->
@@ -245,9 +285,7 @@ fun AppRoot() {
                     )
                 }
 
-                "applySuccess" -> SuccessDialogScreen(
-                    message = "Success! Application delivered.",
-                    onDone = { screen = "records" })
+                "applySuccess" -> SuccessDialogScreen(onDone = { screen = "records" })
 
                 "records" -> {
                     val visibleRecords =
@@ -257,6 +295,7 @@ fun AppRoot() {
                         currentUserRole = currentUser.role,
                         currentUserId = currentUser.userId,
                         allRecords = visibleRecords,
+                        userDao = userDao, // <-- NEW: We pass the database helper here!
                         onWithdraw = { recordToWithdraw ->
                             scope.launch {
                                 withContext(Dispatchers.IO) {
@@ -264,7 +303,6 @@ fun AppRoot() {
                                         recordToWithdraw.applicationId
                                     )
                                 }
-                                // Removed the recordsList.remove() - Flow handles it!
                             }
                         },
                         onBack = { screen = "dashboard" },
@@ -300,16 +338,32 @@ fun AppRoot() {
                                     rejectReason = null
                                 )
                             }
-                            // Removed recordsList.clear() and addAll() - Flow handles it!
+                            // --- NEW: Tell the router to show the success screen! ---
+                            screen = "approveSuccess"
                         }
                     },
                     onBack = { screen = "dashboard" }
                 )
 
-                "reject" -> RejectRequestScreen(
-                    onCancel = { screen = "approvals" },
-                    onSubmit = { reasonString ->
-                        activeRejectRecord?.let { record ->
+                // --- NEW: The Approval Success Route ---
+                "approveSuccess" -> SuccessDialogScreen(
+                    title = "Success!", // Uses the default title
+                    message = "This application has been approved successfully.",
+                    buttonText = "Back to Approval",
+                    onDone = { screen = "approvals" } // Takes them back to the list
+                )
+
+                "reject" -> activeRejectRecord?.let { record ->
+                    // 1. Fetch the employee's exact name from the database
+                    var employeeName by remember(record.employeeId) { mutableStateOf("Loading...") }
+                    LaunchedEffect(record.employeeId) {
+                        userDao.getUserById(record.employeeId)?.let { employeeName = it.fullName }
+                    }
+
+                    RejectRequestScreen(
+                        applicantName = employeeName, // 2. Pass the fetched name!
+                        onCancel = { screen = "approvals" },
+                        onConfirm = { reasonString -> // 3. Changed onSubmit to onConfirm!
                             scope.launch {
                                 withContext(Dispatchers.IO) {
                                     leaveApplicationDao.updateApplicationStatus(
@@ -320,19 +374,54 @@ fun AppRoot() {
                                         reasonString
                                     )
                                 }
-                                // Removed recordsList.clear() and addAll() - Flow handles it!
                             }
+                            activeRejectRecord = null
+                            screen = "approvals"
                         }
-                        activeRejectRecord = null
-                        screen = "approvals"
-                    }
-                )
+                    )
+                }
             }
         }
     }
 }
 
 private data class BottomNavItem(val label: String, val route: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
+
+// --- NEW HELPER: The Splash Screen ---
+@Composable
+fun SplashScreen(onTimeout: () -> Unit) {
+    // This LaunchedEffect runs exactly once when the screen opens.
+    // It waits for 1000 milliseconds (1 second) and then triggers the navigation!
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(1000)
+        onTimeout()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White), // Clean white background like your mockup
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Uses the same logo from your Login Screen
+        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource(id = R.drawable.leaveease_logo),
+            contentDescription = "LeaveEase Logo",
+            modifier = Modifier.size(100.dp)
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            text = "LeaveEase",
+            fontWeight = FontWeight.Medium,
+            fontSize = 28.sp,
+            color = Color.Black,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif
+        )
+    }
+}
 
 @Composable
 fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForgotPassword: () -> Unit) {
@@ -917,7 +1006,11 @@ fun EditProfileScreen(currentUser: UserEntity, onSave: (String, String, String?)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: String, startMillis: Long, endMillis: Long, reason: String, attachmentPath: String?) -> Unit, onBack: () -> Unit) {
+fun LeaveApplicationScreen(
+    availableBalance: Double,
+    onSubmit: (leaveType: String, startMillis: Long, endMillis: Long, reason: String, attachmentPath: String?) -> Unit,
+    onBack: () -> Unit
+) {
     val context = LocalContext.current
     var selected by rememberSaveable { mutableStateOf(leaveTypes.first().typeName) }
     var expanded by remember { mutableStateOf(false) }
@@ -928,20 +1021,20 @@ fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: Strin
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
 
-    // NEW: Variables to hold the selected file's info
     var attachmentName by rememberSaveable { mutableStateOf<String?>(null) }
     var attachmentPath by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // NEW: The Document Picker Launcher
     val fileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            attachmentName = "Document Attached" // A simple label for the UI
+            val mimeType = context.contentResolver.getType(uri)
+            val isPdf = mimeType == "application/pdf"
+            attachmentName = if (isPdf) "Document.pdf" else "Image_Attachment.jpg"
 
-            // Securely copy the PDF/Image into the app's internal storage
             val inputStream = context.contentResolver.openInputStream(uri)
-            val file = java.io.File(context.filesDir, "attachment_${System.currentTimeMillis()}.pdf")
+            val extension = if (isPdf) ".pdf" else ".jpg"
+            val file = java.io.File(context.filesDir, "attachment_${System.currentTimeMillis()}$extension")
             inputStream?.use { input ->
                 file.outputStream().use { output ->
                     input.copyTo(output)
@@ -953,10 +1046,7 @@ fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: Strin
 
     val todayMillis = remember {
         Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
         }.timeInMillis
     }
     val futureDatesOnly = remember {
@@ -983,150 +1073,391 @@ fun LeaveApplicationScreen(availableBalance: Double, onSubmit: (leaveType: Strin
     if (showStartPicker) { DatePickerDialog(onDismissRequest = { showStartPicker = false }, confirmButton = { TextButton(onClick = { startPickerState.selectedDateMillis?.let { start = it.toString() }; showStartPicker = false }) { Text("OK") } }, dismissButton = { TextButton(onClick = { showStartPicker = false }) { Text("Cancel") } }) { DatePicker(state = startPickerState) } }
     if (showEndPicker) { DatePickerDialog(onDismissRequest = { showEndPicker = false }, confirmButton = { TextButton(onClick = { endPickerState.selectedDateMillis?.let { end = it.toString() }; showEndPicker = false }) { Text("OK") } }, dismissButton = { TextButton(onClick = { showEndPicker = false }) { Text("Cancel") } }) { DatePicker(state = endPickerState) } }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Leave Application", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-        Text("Available Balance: $availableBalance Days", color = Color(0xFF1976D2), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-        Spacer(Modifier.height(12.dp))
+    // --- MAIN UI LAYOUT ---
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF4F7FA)) // Soft gray background for the whole screen
+            .padding(horizontal = 16.dp)
+            .verticalScroll(rememberScrollState()) // Makes it scrollable!
+    ) {
+        Spacer(Modifier.height(24.dp))
 
-        Box { OutlinedTextField(selected, {}, label = { Text("Leave Type") }, modifier = Modifier.fillMaxWidth(), readOnly = true, trailingIcon = { TextButton(onClick = { expanded = true }) { Text("▼") } }); DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) { leaveTypes.forEach { type -> DropdownMenuItem(text = { Text(type.typeName) }, onClick = { selected = type.typeName; expanded = false }) } } }
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(value = startText, onValueChange = {}, label = { Text("Start Date") }, modifier = Modifier.fillMaxWidth(), readOnly = true, trailingIcon = { TextButton(onClick = { showStartPicker = true }) { Text("Pick") } })
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(value = endText, onValueChange = {}, label = { Text("End Date") }, modifier = Modifier.fillMaxWidth(), readOnly = true, trailingIcon = { TextButton(onClick = { showEndPicker = true }) { Text("Pick") } })
+        // Header
+        Text("Leave Application Form", fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = Color(0xFF1C2B36))
+        Spacer(Modifier.height(4.dp))
+        Text("Available PTO Balance: ", color = Color.Gray, fontSize = 14.sp)
+        Text("$availableBalance Days", color = Color(0xFF005EB8), fontWeight = FontWeight.Bold, fontSize = 18.sp)
 
-        if (automatedDays > 0) {
-            val durationColor = if (automatedDays > availableBalance) Color.Red else Color(0xFF1976D2)
-            Text("Total Duration: $automatedDays Days", fontWeight = FontWeight.Bold, color = durationColor)
-            Spacer(Modifier.height(12.dp))
-        }
+        Spacer(Modifier.height(24.dp))
 
-        OutlinedTextField(reason, { reason = it }, label = { Text("Reason") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
-        Spacer(Modifier.height(12.dp))
-
-        // NEW: The File Upload UI block
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = attachmentName ?: "",
-                onValueChange = {},
-                placeholder = { Text("Pdf, Png, Jpg files (Optional)") },
-                modifier = Modifier.weight(1f),
-                readOnly = true
-            )
-            Button(
-                onClick = { fileLauncher.launch("*/*") }, // "*/*" allows picking PDFs and Images
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)) // Green button
-            ) {
-                Text("Upload")
+        // --- CARD 1: Leave Type ---
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
+            elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Leave Type", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.DarkGray)
+                Spacer(Modifier.height(8.dp))
+                Box {
+                    OutlinedTextField(
+                        value = selected,
+                        onValueChange = {},
+                        modifier = Modifier.fillMaxWidth().clickable { expanded = true },
+                        readOnly = true,
+                        enabled = false, // Disables typing but allows clicking the box
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            disabledTextColor = Color.Black,
+                            disabledBorderColor = Color(0xFFE0E0E0),
+                            disabledTrailingIconColor = Color.Gray
+                        ),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                        trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Dropdown") }
+                    )
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        leaveTypes.forEach { type ->
+                            DropdownMenuItem(text = { Text(type.typeName) }, onClick = { selected = type.typeName; expanded = false })
+                        }
+                    }
+                }
             }
         }
-        Spacer(Modifier.height(12.dp))
 
-        error?.let { Text(it, color = Color.Red) }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(16.dp))
+
+        // --- CARD 2: Duration ---
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
+            elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Duration", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.DarkGray)
+                Spacer(Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = startText,
+                    onValueChange = {},
+                    label = { Text("Start Date") },
+                    modifier = Modifier.fillMaxWidth().clickable { showStartPicker = true },
+                    readOnly = true,
+                    enabled = false,
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(disabledTextColor = Color.Black, disabledBorderColor = Color(0xFFE0E0E0), disabledLabelColor = Color.Gray),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    trailingIcon = { Icon(Icons.Default.DateRange, contentDescription = "Calendar", tint = Color(0xFF005EB8)) }
+                )
+                Spacer(Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = endText,
+                    onValueChange = {},
+                    label = { Text("End Date") },
+                    modifier = Modifier.fillMaxWidth().clickable { showEndPicker = true },
+                    readOnly = true,
+                    enabled = false,
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(disabledTextColor = Color.Black, disabledBorderColor = Color(0xFFE0E0E0), disabledLabelColor = Color.Gray),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    trailingIcon = { Icon(Icons.Default.DateRange, contentDescription = "Calendar", tint = Color(0xFF005EB8)) }
+                )
+
+                // Dynamic Duration Highlight
+                if (automatedDays > 0) {
+                    Spacer(Modifier.height(16.dp))
+                    val isExceeding = automatedDays > availableBalance
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = if (isExceeding) Color(0xFFFFEBEE) else Color(0xFFEAF2FF), // Light red or Light blue
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                    ) {
+                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Info",
+                                tint = if (isExceeding) Color(0xFFD32F2F) else Color(0xFF005EB8)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "Total Duration: $automatedDays Days",
+                                fontWeight = FontWeight.Bold,
+                                color = if (isExceeding) Color(0xFFD32F2F) else Color(0xFF005EB8)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // --- CARD 3: Reason & Attachments ---
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
+            elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Additional Details", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.DarkGray)
+                Spacer(Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = { reason = it },
+                    placeholder = { Text("Provide reason for leave...", color = Color.LightGray) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 4,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Color(0xFFE0E0E0))
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                // Redesigned File Upload Button
+                OutlinedButton(
+                    onClick = { fileLauncher.launch("*/*") },
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF005EB8)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF005EB8))
+                ) {
+                    Icon(Icons.Default.AddCircle, contentDescription = "Upload")
+                    Spacer(Modifier.width(8.dp))
+                    Text(attachmentName ?: "Attach Supporting Document (Optional)", fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // --- FOOTER: Actions ---
+        error?.let {
+            Text(it, color = Color(0xFFD32F2F), fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Spacer(Modifier.height(8.dp))
+        }
 
         Button(
             onClick = {
                 val s = start.toLongOrNull()
                 val e = end.toLongOrNull()
                 error = when {
-                    s == null || e == null -> "Please enter valid dates."
+                    s == null || e == null -> "Please select your leave dates."
                     s > e -> "Start date cannot be later than end date."
-                    automatedDays > availableBalance -> "Cannot apply: Duration ($automatedDays days) exceeds your balance ($availableBalance days)."
-                    reason.isBlank() -> "Reason is required."
+                    automatedDays > availableBalance -> "Cannot apply: Duration ($automatedDays days) exceeds your balance."
+                    reason.isBlank() -> "Please provide a reason for your leave."
                     else -> null
                 }
-
-                // Pass the attachmentPath into the submit function!
                 if (error == null) onSubmit(selected, s!!, e!!, reason, attachmentPath)
             },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005EB8)),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp)
         ) {
-            Text("Submit Application")
+            Text("Submit Application", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
         }
-        TextButton(onClick = onBack) { Text("Back") }
+
+        Spacer(Modifier.height(8.dp))
+
+        TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+            Text("Cancel", color = Color.Gray, fontWeight = FontWeight.Medium)
+        }
+
+        Spacer(Modifier.height(32.dp)) // Extra padding for the bottom of the scroll
     }
 }
 
 @Composable
-fun SuccessDialogScreen(message: String, onDone: () -> Unit) {
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) { Text(message, fontWeight = FontWeight.Bold); Spacer(Modifier.height(16.dp)); Button(onClick = onDone, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) { Text("Continue") } }
+fun SuccessDialogScreen(
+    title: String = "Success!",
+    message: String = "This application has been submitted successfully.",
+    buttonText: String = "Back to My Records",
+    onDone: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // --- 1. The Green Checkmark Badge ---
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                // Note: You already added the 'clip' import earlier, so this will work perfectly!
+                .clip(CircleShape)
+                .background(Color(0xFFE8F5E9)), // Soft light green background
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "Success",
+                tint = Color(0xFF4CAF50), // Bold solid green checkmark
+                modifier = Modifier.size(40.dp)
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // --- 2. The Title ---
+        Text(
+            text = title,
+            fontWeight = FontWeight.Bold,
+            fontSize = 24.sp,
+            color = Color(0xFF1C2B36) // Dark crisp text
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // --- 3. The Subtitle / Message ---
+        Text(
+            text = message,
+            color = Color.Gray,
+            fontSize = 15.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            lineHeight = 22.sp
+        )
+
+        Spacer(Modifier.height(40.dp))
+
+        // --- 4. The Action Button ---
+        Button(
+            onClick = onDone,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp), // Taller, more clickable button
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF005EB8) // Your brand's deep blue
+            ),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp) // Nice soft corners
+        ) {
+            Text(buttonText, color = Color.White, fontWeight = FontWeight.Medium)
+        }
+    }
 }
 
 @Composable
-fun LeaveRecordsScreen(currentUserName: String, currentUserRole: UserRole, currentUserId: Int, allRecords: List<LeaveApplicationEntity>, onWithdraw: (LeaveApplicationEntity) -> Unit, onBack: () -> Unit, onRecordClick: (LeaveApplicationEntity) -> Unit) {
+fun LeaveRecordsScreen(
+    currentUserName: String,
+    currentUserRole: UserRole,
+    currentUserId: Int,
+    allRecords: List<LeaveApplicationEntity>,
+    userDao: UserDao, // <-- NEW: Added UserDao here!
+    onWithdraw: (LeaveApplicationEntity) -> Unit,
+    onBack: () -> Unit,
+    onRecordClick: (LeaveApplicationEntity) -> Unit
+) {
     var parentTab by rememberSaveable { mutableIntStateOf(if (currentUserRole == UserRole.MANAGER) 0 else 1) }
     var myRecordsTab by rememberSaveable { mutableIntStateOf(0) }
     var approvalTab by rememberSaveable { mutableIntStateOf(0) }
+
     val myRecords = allRecords.filter { it.employeeId == currentUserId }
     val approvalHistory = allRecords.filter { it.status == ApplicationStatus.APPROVED || it.status == ApplicationStatus.REJECTED }
     val visibleParentTab = if (currentUserRole == UserRole.MANAGER) parentTab else 1
-    Column(Modifier.fillMaxSize().padding(12.dp)) {
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8F9FA))
+            .padding(16.dp)
+    ) {
         if (currentUserRole == UserRole.MANAGER) {
-            ScrollableTabRow(selectedTabIndex = parentTab) { Tab(selected = parentTab == 0, onClick = { parentTab = 0 }, text = { Text("Approval History") }); Tab(selected = parentTab == 1, onClick = { parentTab = 1 }, text = { Text("My Records") }) }
+            androidx.compose.material3.TabRow(selectedTabIndex = parentTab, containerColor = Color.Transparent) {
+                Tab(selected = parentTab == 0, onClick = { parentTab = 0 }, text = { Text("Approval History") })
+                Tab(selected = parentTab == 1, onClick = { parentTab = 1 }, text = { Text("My Records") })
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+
+        if (visibleParentTab == 0) {
+            // 1. The Pill Filters
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp) // Keeps a nice gap between the even buttons
+            ) {
+                val filters = listOf("All Decisions", "Approved", "Rejected")
+                filters.forEachIndexed { index, title ->
+                    val isSelected = approvalTab == index
+
+                    // NEW: Dynamic color logic based on the button!
+                    val activeColor = when (index) {
+                        1 -> Color(0xFF2E7D32) // Bold Green for Approved
+                        2 -> Color(0xFFD32F2F) // Bold Red for Rejected
+                        else -> Color(0xFF005EB8) // Standard Blue for All Decisions
+                    }
+
+                    Surface(
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                        color = if (isSelected) activeColor else Color.White,
+                        border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE0E0E0)),
+                        modifier = Modifier
+                            .weight(1f) // <-- This magic line makes all 3 buttons exactly equal width!
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+                            .clickable { approvalTab = index }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center, // Centers the text inside the button
+                            modifier = Modifier.padding(vertical = 10.dp)
+                        ) {
+                            if (isSelected) {
+                                // Swap to an "X" icon for the rejected tab
+                                val icon = if (index == 2) Icons.Default.Close else Icons.Default.Check
+                                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                            }
+                            Text(
+                                text = title,
+                                color = if (isSelected) Color.White else Color.DarkGray,
+                                fontSize = 12.sp, // Slightly smaller text so it fits perfectly on smaller phones
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1 // Prevents text from stacking onto two lines
+                            )
+                        }
+                    }
+                }
+            }
             Spacer(Modifier.height(12.dp))
-        }
-        when (visibleParentTab) {
-            0 -> {
-                ScrollableTabRow(selectedTabIndex = approvalTab) { listOf("All Decisions", "Approved", "Rejected").forEachIndexed { index, title -> Tab(selected = approvalTab == index, onClick = { approvalTab = index }, text = { Text(title) }) } }
-                Spacer(Modifier.height(12.dp))
-                val filtered = when (approvalTab) { 1 -> approvalHistory.filter { it.status == ApplicationStatus.APPROVED }; 2 -> approvalHistory.filter { it.status == ApplicationStatus.REJECTED }; else -> approvalHistory }.sortedByDescending { it.startDate }
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
-                    items(filtered) { record ->
-                        val typeName = leaveTypes.firstOrNull { it.leaveTypeId == record.leaveTypeId }?.typeName ?: "Leave Application"
-                        Card(Modifier.fillMaxWidth().clickable { onRecordClick(record) }) {
-                            Column(Modifier.padding(12.dp)) {
-                                Text(typeName, fontWeight = FontWeight.Bold)
-                                Text("Reference ID: #${record.applicationId}", color = Color.Gray)
-                                Text("${formatDate(record.startDate)} to ${formatDate(record.endDate)}")
-                                Text(if (record.status == ApplicationStatus.APPROVED) "Approved" else "Rejected", fontWeight = FontWeight.Bold, color = if (record.status == ApplicationStatus.APPROVED) Color(0xFF2E7D32) else Color(0xFFC62828))
-                                Text("Decision: ${record.approvalDate?.let { formatDate(it) } ?: "Processed"}", color = Color.Gray)
-                                if (record.status == ApplicationStatus.REJECTED && !record.rejectReason.isNullOrBlank()) Text(record.rejectReason, color = Color.Red)
-                            }
-                        }
-                    }
+
+            val filtered = when (approvalTab) {
+                1 -> approvalHistory.filter { it.status == ApplicationStatus.APPROVED }
+                2 -> approvalHistory.filter { it.status == ApplicationStatus.REJECTED }
+                else -> approvalHistory
+            }.sortedByDescending { it.startDate }
+
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxSize()) {
+                items(filtered) { record ->
+                    // --- NEW: Pass the userDao into the card ---
+                    ApprovalHistoryCard(record = record, userDao = userDao, onRecordClick = onRecordClick)
+                }
+                item { Spacer(Modifier.height(24.dp)) }
+            }
+
+        } else {
+            Text("My Records", fontWeight = FontWeight.Bold, fontSize = 24.sp, color = Color(0xFF1C2B36))
+            Spacer(Modifier.height(12.dp))
+
+            val tabTitles = listOf("All", "Approved", "Pending", "Rejected")
+            androidx.compose.material3.TabRow(selectedTabIndex = myRecordsTab, containerColor = Color.Transparent, contentColor = Color(0xFF1976D2)) {
+                tabTitles.forEachIndexed { index, title ->
+                    Tab(selected = myRecordsTab == index, onClick = { myRecordsTab = index }, text = { Text(title, fontWeight = if (myRecordsTab == index) FontWeight.Bold else FontWeight.Normal, color = if (myRecordsTab == index) Color(0xFF1976D2) else Color.Gray) })
                 }
             }
-            else -> {
-                ScrollableTabRow(selectedTabIndex = myRecordsTab) { listOf("All", "Approved", "Pending", "Rejected").forEachIndexed { index, title -> Tab(selected = myRecordsTab == index, onClick = { myRecordsTab = index }, text = { Text(title) }) } }
-                Spacer(Modifier.height(12.dp))
-                val filtered = when (myRecordsTab) { 1 -> myRecords.filter { it.status == ApplicationStatus.APPROVED }; 2 -> myRecords.filter { it.status == ApplicationStatus.PENDING }; 3 -> myRecords.filter { it.status == ApplicationStatus.REJECTED }; else -> myRecords }.sortedByDescending { it.startDate }
-                val recentApplications = filtered.filter { it.status == ApplicationStatus.PENDING }
-                val pastApplications = filtered.filter { it.status == ApplicationStatus.APPROVED || it.status == ApplicationStatus.REJECTED }
-                Column(Modifier.fillMaxSize()) {
-                    Text("Recent Applications", fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-                        items(recentApplications) { record ->
-                            val typeName = leaveTypes.firstOrNull { it.leaveTypeId == record.leaveTypeId }?.typeName ?: "Leave Application"
-                            Card(Modifier.fillMaxWidth().clickable { onRecordClick(record) }) {
-                                Column(Modifier.padding(12.dp)) {
-                                    Text(typeName, fontWeight = FontWeight.Bold)
-                                    Text("Reference ID: #${record.applicationId}", color = Color.Gray)
-                                    Text("${formatDate(record.startDate)} to ${formatDate(record.endDate)}")
-                                    Text("Reason: ${record.reason}")
-                                    TextButton(onClick = { onWithdraw(record) }) { Text("Withdraw", color = Color.Red) }
-                                }
-                            }
-                        }
-                        item { Spacer(Modifier.height(8.dp)); Text("Past Applications", fontWeight = FontWeight.Bold); Spacer(Modifier.height(8.dp)) }
-                        items(pastApplications) { record ->
-                            val typeName = leaveTypes.firstOrNull { it.leaveTypeId == record.leaveTypeId }?.typeName ?: "Leave Application"
-                            Card(Modifier.fillMaxWidth().clickable { onRecordClick(record) }) {
-                                Column(Modifier.padding(12.dp)) {
-                                    Text(typeName, fontWeight = FontWeight.Bold)
-                                    Text("Reference ID: #${record.applicationId}", color = Color.Gray)
-                                    Text("${formatDate(record.startDate)} to ${formatDate(record.endDate)}")
-                                    Text("Reason: ${record.reason}")
-                                    Text(if (record.status == ApplicationStatus.APPROVED) "Approved" else "Rejected", fontWeight = FontWeight.Bold, color = if (record.status == ApplicationStatus.APPROVED) Color(0xFF2E7D32) else Color(0xFFC62828))
-                                    if (record.status == ApplicationStatus.REJECTED && !record.rejectReason.isNullOrBlank()) Text(record.rejectReason, color = Color.Red)
-                                }
-                            }
-                        }
-                    }
-                }
+            Spacer(Modifier.height(16.dp))
+
+            val filtered = when (myRecordsTab) { 1 -> myRecords.filter { it.status == ApplicationStatus.APPROVED }; 2 -> myRecords.filter { it.status == ApplicationStatus.PENDING }; 3 -> myRecords.filter { it.status == ApplicationStatus.REJECTED }; else -> myRecords }.sortedByDescending { it.startDate }
+            val recentApplications = filtered.filter { it.status == ApplicationStatus.PENDING }
+            val pastApplications = filtered.filter { it.status == ApplicationStatus.APPROVED || it.status == ApplicationStatus.REJECTED || it.status == ApplicationStatus.COMPLETED }
+
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                if (recentApplications.isNotEmpty()) { item { Text("Recent Applications:", color = Color.DarkGray, fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp, top = 8.dp)) }; items(recentApplications) { record -> RecordCard(record = record, onWithdraw = onWithdraw, onRecordClick = onRecordClick) } }
+                if (pastApplications.isNotEmpty()) { item { Text("Past Applications:", color = Color.DarkGray, fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp, top = 8.dp)) }; items(pastApplications) { record -> RecordCard(record = record, onWithdraw = null, onRecordClick = onRecordClick) } }
+                if (recentApplications.isEmpty() && pastApplications.isEmpty()) { item { Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { Text("No records found.", color = Color.Gray) } } }
+                item { Spacer(Modifier.height(24.dp)) }
             }
         }
-        TextButton(onClick = onBack) { Text("Back") }
     }
 }
 
@@ -1321,114 +1652,260 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, userDao: UserDao, onBack: 
 }
 
 @Composable
-fun LeaveApprovalsScreen(records: List<LeaveApplicationEntity>, userDao: UserDao, onNavigateToReject: (LeaveApplicationEntity) -> Unit, onApprove: (LeaveApplicationEntity) -> Unit, onBack: () -> Unit) {
+fun LeaveApprovalsScreen(
+    records: List<LeaveApplicationEntity>,
+    userDao: UserDao,
+    onNavigateToReject: (LeaveApplicationEntity) -> Unit,
+    onApprove: (LeaveApplicationEntity) -> Unit,
+    onBack: () -> Unit
+) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Pending Approvals", fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(12.dp))
-        records.filter { it.status == ApplicationStatus.PENDING }.forEach { record ->
-            var applicantName by remember(record.employeeId) { mutableStateOf("Loading...") }
-            LaunchedEffect(record.employeeId) {
-                userDao.getUserById(record.employeeId)?.let { applicantName = it.fullName }
-            }
-            val typeName = leaveTypes.firstOrNull { it.leaveTypeId == record.leaveTypeId }?.typeName ?: "Unknown Leave"
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color(0xFFF9FAFC))
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier.padding(end = 12.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Surface(
-                                modifier = Modifier,
-                                shape = androidx.compose.foundation.shape.CircleShape,
-                                color = Color(0xFFEAF2FF)
-                            ) {
-                                Box(Modifier.padding(12.dp), contentAlignment = Alignment.Center) {
-                                    Text("SJ", fontWeight = FontWeight.Bold, color = Color(0xFF1E3A8A))
-                                }
-                            }
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(applicantName, fontWeight = FontWeight.Bold)
-                            Text("Team Member", color = Color.Gray)
-                        }
-                        Spacer(Modifier.weight(1f))
-                        Surface(
-                            color = Color(0xFFFFF3E0),
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(999.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text("⏳", color = Color(0xFFEF6C00))
-                                Text("Pending", color = Color(0xFFEF6C00), fontWeight = FontWeight.SemiBold)
-                            }
-                        }
+
+        // 1. Centered and larger title
+        Text(
+            text = "Pending Approvals",
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 24.sp,
+            color = Color(0xFF1C2B36),
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        Spacer(Modifier.height(20.dp))
+
+        // Made the list scrollable so it doesn't break on small screens
+        Column(
+            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            val pendingRecords = records.filter { it.status == ApplicationStatus.PENDING }
+
+            if (pendingRecords.isEmpty()) {
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text("No pending approvals.", color = Color.Gray)
+                }
+            } else {
+                pendingRecords.forEach { record ->
+                    var applicantName by remember(record.employeeId) { mutableStateOf("Loading...") }
+                    LaunchedEffect(record.employeeId) {
+                        userDao.getUserById(record.employeeId)?.let { applicantName = it.fullName }
                     }
+                    val typeName = leaveTypes.firstOrNull { it.leaveTypeId == record.leaveTypeId }?.typeName ?: "Unknown Leave"
 
                     Card(
-                        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color(0xFFF3F5F7))
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color(0xFFF9FAFC)),
+                        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
                     ) {
-                        Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Type", color = Color.Gray)
-                                Spacer(Modifier.height(4.dp))
-                                Text(typeName, fontWeight = FontWeight.Bold)
-                            }
-                            Column(Modifier.weight(1f)) {
-                                Text("Duration", color = Color.Gray)
-                                Spacer(Modifier.height(4.dp))
-                                Text("${formatDate(record.startDate)} - ${formatDate(record.endDate)} (${record.totalDuration.toInt()} Days)", fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
-                    Column {
-                        Text("Reason", color = Color.Gray)
-                        Spacer(Modifier.height(4.dp))
-                        Text(record.reason)
-                    }
+                            // Header: Name and ID (Icon Removed!)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(applicantName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1C2B36))
+                                    // 2. Changed "Team Member" to Employee ID
+                                    Text("Employee ID: ${record.employeeId}", color = Color.Gray, fontSize = 13.sp)
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Surface(
+                                    color = Color(0xFFFFF3E0),
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text("⏳", fontSize = 12.sp)
+                                        Text("Pending", color = Color(0xFFE65100), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(
-                            onClick = { onNavigateToReject(record) },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC62828)),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC62828))
-                        ) {
-                            Text("✕ Reject", color = Color(0xFFC62828))
-                        }
-                        Button(
-                            onClick = { onApprove(record) },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5))
-                        ) {
-                            Text("✓ Approve", color = Color.White)
+                            Card(
+                                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color(0xFFF3F5F7)),
+                                elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 0.dp)
+                            ) {
+                                Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Type", color = Color.Gray, fontSize = 13.sp)
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(typeName, fontWeight = FontWeight.Bold, color = Color(0xFF1C2B36))
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Duration", color = Color.Gray, fontSize = 13.sp)
+                                        Spacer(Modifier.height(4.dp))
+                                        Text("${formatDate(record.startDate)} - ${formatDate(record.endDate)}", fontWeight = FontWeight.Bold, color = Color(0xFF1C2B36))
+                                        Text("(${record.totalDuration.toInt()} Days)", fontWeight = FontWeight.Bold, color = Color(0xFF1C2B36))
+                                    }
+                                }
+                            }
+
+                            Column {
+                                Text("Reason", color = Color.Gray, fontSize = 13.sp)
+                                Spacer(Modifier.height(4.dp))
+                                Text(record.reason, color = Color(0xFF333333), fontSize = 14.sp)
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                                OutlinedButton(
+                                    onClick = { onNavigateToReject(record) },
+                                    modifier = Modifier.weight(1f).height(44.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC62828)),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC62828)),
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("✕ Reject", color = Color(0xFFC62828), fontWeight = FontWeight.Medium)
+                                }
+                                Button(
+                                    onClick = { onApprove(record) },
+                                    modifier = Modifier.weight(1f).height(44.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("✓ Approve", color = Color.White, fontWeight = FontWeight.Medium)
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-        TextButton(onClick = onBack) { Text("Back") }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Slightly updated back button to match modern styling
+        Button(
+            onClick = onBack,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE0E0E0)),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+        ) {
+            Text("Back to Dashboard", color = Color.DarkGray, fontWeight = FontWeight.Medium)
+        }
     }
 }
 
 @Composable
-fun RejectRequestScreen(onCancel: () -> Unit, onSubmit: (String) -> Unit) {
+fun RejectRequestScreen(
+    applicantName: String,
+    onCancel: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
     var reason by rememberSaveable { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Center) {
-        Text("Reject Request", fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(reason, { reason = it }, label = { Text("Rejection Reason") }, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
-            Button(onClick = { if (reason.isNotBlank()) onSubmit(reason) }, modifier = Modifier.weight(1f)) { Text("Confirm") }
+    var isError by rememberSaveable { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White)
+            .padding(24.dp)
+    ) {
+        // --- 1. Header Row (Icon + Title) ---
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Info, // A built-in icon that works well here
+                contentDescription = "Reject",
+                tint = Color(0xFFC62828), // Deep Red
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "Reject Request",
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp,
+                color = Color(0xFF1C2B36)
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // --- 2. Dynamic Subtitle (With bold applicant name) ---
+        val subtitle = androidx.compose.ui.text.buildAnnotatedString {
+            append("You are about to reject the leave request for ")
+            withStyle(style = androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = Color.Black)) {
+                append(applicantName)
+            }
+            append(". Please provide a reason below.")
+        }
+        Text(
+            text = subtitle,
+            fontSize = 14.sp,
+            color = Color.DarkGray,
+            lineHeight = 20.sp
+        )
+
+        Spacer(Modifier.height(24.dp))
+
+        // --- 3. Text Input Area ---
+        Text(
+            text = "Reason (Required)",
+            fontSize = 14.sp,
+            color = Color(0xFF546E7A)
+        )
+        Spacer(Modifier.height(8.dp))
+
+        OutlinedTextField(
+            value = reason,
+            onValueChange = {
+                reason = it
+                if (it.isNotBlank()) isError = false // Clear error when they start typing
+            },
+            placeholder = { Text("E.g., Project deadline conflict...", color = Color.Gray) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(120.dp), // Makes it a nice big text box
+            isError = isError,
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                unfocusedContainerColor = Color(0xFFF4F6F9), // Light blue-gray background
+                focusedContainerColor = Color(0xFFF4F6F9),
+                unfocusedBorderColor = Color(0xFFE0E0E0),
+                focusedBorderColor = Color(0xFF005EB8) // Blue border when typing
+            )
+        )
+
+        // Show a warning if they try to submit without typing a reason
+        if (isError) {
+            Text(
+                text = "A reason is required to reject an application.",
+                color = Color.Red,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+
+        Spacer(Modifier.height(32.dp))
+
+        // --- 4. Action Buttons ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = onCancel,
+                colors = ButtonDefaults.textButtonColors(contentColor = Color.DarkGray)
+            ) {
+                Text("Cancel", fontSize = 15.sp)
+            }
+
+            Spacer(Modifier.width(16.dp))
+
+            Button(
+                onClick = {
+                    if (reason.isBlank()) {
+                        isError = true // Trigger the error message if empty
+                    } else {
+                        onConfirm(reason)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)), // Match the red header
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), // Pill shape
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+            ) {
+                Text("Confirm Rejection", color = Color.White, fontWeight = FontWeight.Medium)
+            }
         }
     }
 }
@@ -1544,6 +2021,202 @@ fun RecoverySuccessScreen(onReturn: () -> Unit) {
             shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
         ) {
             Text("Return to Login", color = Color.White, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+// --- NEW HELPER: The Beautiful Card Design ---
+// --- NEW HELPER: The Beautiful Card Design ---
+@Composable
+fun RecordCard(
+    record: LeaveApplicationEntity,
+    onWithdraw: ((LeaveApplicationEntity) -> Unit)?,
+    onRecordClick: (LeaveApplicationEntity) -> Unit
+) {
+    // Formatting the date to match "Feb 05, 2024"
+    val dateFormatter = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault())
+    val startStr = dateFormatter.format(java.util.Date(record.startDate))
+    val endStr = dateFormatter.format(java.util.Date(record.endDate))
+    val dateDisplay = if (startStr == endStr) startStr else "$startStr - $endStr"
+
+    // Configuring specific colors for the status pills
+    val (statusBg, statusText, statusLabel) = when(record.status) {
+        ApplicationStatus.PENDING -> Triple(Color(0xFFFDECC8), Color(0xFFD97706), "Pending")
+        ApplicationStatus.APPROVED -> Triple(Color(0xFFD0E4FF), Color(0xFF005EB8), "Approved")
+        ApplicationStatus.REJECTED -> Triple(Color(0xFFFFCDD2), Color(0xFFC62828), "Rejected")
+        ApplicationStatus.COMPLETED -> Triple(Color(0xFFF0F0F0), Color(0xFF616161), "Completed")
+    }
+
+    val typeName = leaveTypes.firstOrNull { it.leaveTypeId == record.leaveTypeId }?.typeName ?: "Leave Application"
+
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onRecordClick(record) },
+        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
+        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 1.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            // Row 1: Title and Status Pill
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
+                    Text(typeName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1C2B36))
+                    Spacer(Modifier.height(4.dp))
+                    Text(dateDisplay, color = Color.Gray, fontSize = 13.sp)
+                }
+                Surface(color = statusBg, shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)) {
+                    Text(
+                        text = statusLabel,
+                        color = statusText,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Row 2: Duration with Calendar Icon
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.DateRange, contentDescription = "Duration", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("${record.totalDuration.toInt()} Day${if (record.totalDuration > 1) "s" else ""}", color = Color.DarkGray, fontSize = 13.sp)
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Row 3: Employee's Application Reason Preview
+            Text(record.reason, color = Color(0xFF333333), fontSize = 14.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+
+            // --- NEW: Row 3.5 - The Manager's Rejection Reason ---
+            if (record.status == ApplicationStatus.REJECTED && !record.rejectReason.isNullOrBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    color = Color(0xFFFFEBEE), // Soft red background
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Rejected",
+                            tint = Color(0xFFC62828),
+                            modifier = Modifier.size(16.dp).padding(top = 2.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("Manager's Note:", color = Color(0xFFC62828), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(2.dp))
+                            Text(record.rejectReason!!, color = Color(0xFFC62828), fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+
+            // Conditional Row 4: The Withdraw Button (Only shows for Pending!)
+            if (record.status == ApplicationStatus.PENDING && onWithdraw != null) {
+                Spacer(Modifier.height(12.dp))
+                androidx.compose.material3.HorizontalDivider(color = Color(0xFFF0F0F0))
+                Spacer(Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(
+                        onClick = { onWithdraw(record) },
+                        colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFD32F2F))
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = "Withdraw", modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Withdraw", fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// --- NEW HELPER: Manager Approval History Card ---
+@Composable
+fun ApprovalHistoryCard(
+    record: LeaveApplicationEntity,
+    userDao: UserDao, // <-- NEW: Added UserDao here!
+    onRecordClick: (LeaveApplicationEntity) -> Unit
+) {
+    // Fetch the employee's exact name from the database!
+    var employeeName by remember(record.employeeId) { mutableStateOf("Loading...") }
+    LaunchedEffect(record.employeeId) {
+        userDao.getUserById(record.employeeId)?.let { employeeName = it.fullName }
+    }
+
+    val isApproved = record.status == ApplicationStatus.APPROVED
+    val accentColor = if (isApproved) Color(0xFF00C853) else Color(0xFFD50000)
+    val statusText = if (isApproved) "Approved" else "Rejected"
+    val statusBg = if (isApproved) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
+    val statusContent = if (isApproved) Color(0xFF2E7D32) else Color(0xFFC62828)
+
+    val typeName = leaveTypes.firstOrNull { it.leaveTypeId == record.leaveTypeId }?.typeName ?: "Leave"
+    val dateDisplay = "${formatDate(record.startDate)} - ${formatDate(record.endDate)} (${record.totalDuration.toInt()} Days)"
+
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onRecordClick(record) },
+        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
+        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+    ) {
+        Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+            // Left Accent Border
+            Box(Modifier.width(4.dp).fillMaxHeight().background(accentColor))
+
+            Column(Modifier.padding(16.dp).weight(1f)) {
+
+                // --- REDESIGNED HEADER: Real Name, ID, and Status (No Icon) ---
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(employeeName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1C2B36))
+                        Text("Employee ID: ${record.employeeId}", color = Color.Gray, fontSize = 13.sp)
+                    }
+                    // Status Pill
+                    Surface(color = statusBg, shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp), border = androidx.compose.foundation.BorderStroke(1.dp, accentColor.copy(alpha = 0.3f))) {
+                        Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(if (isApproved) Icons.Default.Check else Icons.Default.Close, contentDescription = null, tint = statusContent, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(statusText, color = statusContent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // Inner Gray Box for Details
+                Surface(color = Color(0xFFF4F6F9), shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.DateRange, contentDescription = null, tint = Color.DarkGray, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(typeName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1C2B36))
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(dateDisplay, color = Color.DarkGray, fontSize = 13.sp, modifier = Modifier.padding(start = 24.dp))
+
+                        if (!isApproved && !record.rejectReason.isNullOrBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text("\"${record.rejectReason}\"", color = Color(0xFFD32F2F), fontSize = 13.sp, modifier = Modifier.padding(start = 24.dp))
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                androidx.compose.material3.HorizontalDivider(color = Color(0xFFF0F0F0))
+                Spacer(Modifier.height(12.dp))
+
+                // Footer: Decision Date and Arrow
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Decision: ${record.approvalDate?.let { formatDate(it) } ?: "Recently"}", color = Color.Gray, fontSize = 12.sp)
+                    }
+                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Color(0xFF005EB8), modifier = Modifier.size(20.dp))
+                }
+            }
         }
     }
 }
