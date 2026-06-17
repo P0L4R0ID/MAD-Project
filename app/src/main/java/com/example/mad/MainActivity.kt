@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Button
@@ -134,7 +135,7 @@ fun AppRoot() {
         }
     }
 
-    val showBottomBar = screen != "login" && screen != "recovery"
+    val showBottomBar = screen != "login" && screen != "recovery" && screen != "recoverySuccess"
     val bottomItems = remember(currentUser.role) {
         if (currentUser.role == UserRole.MANAGER) {
             listOf(
@@ -182,17 +183,22 @@ fun AppRoot() {
                     },
                     onForgotPassword = { screen = "recovery" })
 
-                "recovery" -> PasswordRecoveryScreen(onBack = { screen = "login" })
+                "recovery" -> PasswordRecoveryScreen(
+                    onBack = { screen = "login" },
+                    onSuccess = { screen = "recoverySuccess" } // Goes to our new screen!
+                )
+                "recoverySuccess" -> RecoverySuccessScreen(
+                    onReturn = { screen = "login" }
+                )
                 "dashboard" -> EmployeeProfileScreen(
                     userName = currentUser.fullName,
                     userId = currentUser.userId,
-                    basePto = currentUser.ptoBalance, // <-- We pass the 15.0 from the database here
+                    basePto = currentUser.ptoBalance,
                     records = recordsList,
                     onApply = { screen = "apply" },
                     onEdit = { screen = "edit" },
                     onRecords = { screen = "records" }
                 )
-
                 "edit" -> EditProfileScreen(
                     currentUser = currentUser,
                     onSave = { updatedName, updatedPhone, updatedPhotoPath ->
@@ -207,7 +213,6 @@ fun AppRoot() {
                     },
                     onLogout = { screen = "login" }
                 )
-
                 "apply" -> {
                     // Calculate the user's current exact balance
                     val usedPto = recordsList
@@ -333,38 +338,149 @@ private data class BottomNavItem(val label: String, val route: String, val icon:
 fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForgotPassword: () -> Unit) {
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("LeaveEase", fontWeight = FontWeight.Bold)
+    // NEW: We need a state to remember if the password should be shown as text or dots
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+
+        // --- 1. Your Custom Logo ---
+        // Change 'your_logo_name' to the actual name of your image in the res > drawable folder!
+        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource(id = R.drawable.leaveease_logo),
+            contentDescription = "LeaveEase Logo",
+            modifier = Modifier.size(80.dp)
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        // --- 2. Title & Subtitle ---
+        Text(
+            text = "LeaveEase",
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 28.sp,
+            color = Color.Black,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif // Gives it that classic look from your mockup
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Welcome back. Please enter your details.",
+            color = Color.Gray,
+            fontSize = 14.sp
+        )
+
+        Spacer(Modifier.height(40.dp))
+
+        // --- 3. Username Field (External Label) ---
+        Text(
+            text = "Username",
+            modifier = Modifier.fillMaxWidth(),
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
+            color = Color(0xFF333333)
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = username,
+            onValueChange = { username = it },
+            placeholder = { Text("Enter your username", color = Color.LightGray) },
+            leadingIcon = {
+                Icon(Icons.Filled.Person, contentDescription = "User", tint = Color.LightGray)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+            singleLine = true,
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = Color(0xFFE0E0E0) // Gives it that soft, light border when not clicked
+            )
+        )
+
         Spacer(Modifier.height(20.dp))
-        OutlinedTextField(username, { username = it }, label = { Text("Username") }, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(12.dp))
+
+        // --- 4. Password Row (Label + Forgot Password Link) ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Password", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF333333))
+            Text(
+                text = "Forgot Password?",
+                color = Color(0xFF1976D2), // Blue link
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clickable { onForgotPassword() }
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+
+        // --- 5. Password Field ---
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("Password") },
+            placeholder = { Text("••••••••", color = Color.LightGray) },
+            leadingIcon = {
+                Icon(Icons.Filled.Lock, contentDescription = "Lock", tint = Color.LightGray)
+            },
+            trailingIcon = {
+                // A clean, crash-proof text button to toggle the password visibility
+                Text(
+                    text = if (passwordVisible) "Hide" else "Show",
+                    color = Color.Gray,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .padding(end = 16.dp)
+                        .clickable { passwordVisible = !passwordVisible }
+                )
+            },
             modifier = Modifier.fillMaxWidth(),
-            // This line turns the text into secure dots!
-            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-            // This tells the phone keyboard to turn off autocorrect
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+            singleLine = true,
+            visualTransformation = if (passwordVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Password
+            ),
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = Color(0xFFE0E0E0)
             )
         )
+
         Spacer(Modifier.height(8.dp))
         errorMessage?.let { Text(it, color = Color.Red, fontWeight = FontWeight.Medium) }
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = { if (username.isNotBlank() && password.isNotBlank()) onLogin(username.trim(), password) }, modifier = Modifier.fillMaxWidth()) { Text("Login") }
-        TextButton(onClick = onForgotPassword) { Text("Forgot Password") }
+        Spacer(Modifier.height(24.dp))
+
+        // --- 6. The Login Button ---
+        Button(
+            onClick = { if (username.isNotBlank() && password.isNotBlank()) onLogin(username.trim(), password) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp), // Taller button to match mockup
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF005EB8) // Nice deep blue
+            ),
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp) // Adds a tiny drop shadow
+        ) {
+            Text("Login", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        }
     }
 }
 
 @Composable
-fun PasswordRecoveryScreen(onBack: () -> Unit) {
-    // 1. We grab the context HERE, safely inside the Composable!
+fun PasswordRecoveryScreen(onBack: () -> Unit, onSuccess: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
 
     var email by rememberSaveable { mutableStateOf("") }
     var employeeId by rememberSaveable { mutableStateOf("") }
+
+    // Variable to hold error messages for validation
+    var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -441,11 +557,26 @@ fun PasswordRecoveryScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(32.dp))
 
+        // Show the error message if they leave fields blank
+        errorMessage?.let {
+            Text(
+                text = it,
+                color = Color.Red,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(bottom = 8.dp).fillMaxWidth(),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
+
         Button(
             onClick = {
-                // 3. We use the safe 'context' variable we created at the top!
-                android.widget.Toast.makeText(context, "Request Submitted!", android.widget.Toast.LENGTH_SHORT).show()
-                onBack()
+                // VALIDATION: Check if either box is completely empty
+                if (email.isBlank() || employeeId.isBlank()) {
+                    errorMessage = "Please enter both your Email and Employee ID."
+                } else {
+                    errorMessage = null // Clear error
+                    onSuccess() // Navigate to the new success screen!
+                }
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -510,6 +641,9 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
 
     val balance = basePto - usedPto
 
+    // Calculate the percentage for the progress bar (between 0.0 and 1.0)
+    val progressRatio = if (basePto > 0) (balance / basePto).toFloat().coerceIn(0f, 1f) else 0f
+
     val upcomingLeaves = records
         .filter { it.employeeId == userId && it.status == ApplicationStatus.APPROVED && it.endDate >= System.currentTimeMillis() }
         .sortedBy { it.startDate }
@@ -519,22 +653,128 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
         Text("Welcome back, $userName", fontWeight = FontWeight.Bold, fontSize = 20.sp)
         Spacer(Modifier.height(16.dp))
 
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Remaining PTO", fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                Text("$balance days", fontSize = 18.sp, color = Color(0xFF1976D2))
-            }
-        }
-        Spacer(Modifier.height(12.dp))
+        // --- 1. NEW PTO BALANCE CARD ---
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
+            elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                // Header Row with Icon
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("PTO Balance", fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Color(0xFF1C2B36))
+                    Surface(
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        color = Color(0xFFEAF2FF),
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DateRange,
+                            contentDescription = "Calendar",
+                            tint = Color(0xFF005EB8),
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
 
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Button(onClick = onApply, modifier = Modifier.fillMaxWidth()) { Text("+ Apply for Leave") }
+                // Big Number Row
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "${balance.toInt()}",
+                        fontSize = 48.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF005EB8),
+                        lineHeight = 48.sp // Keeps the giant text from pushing margins down
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Days Available",
+                        fontSize = 13.sp,
+                        color = Color.DarkGray,
+                        modifier = Modifier.padding(bottom = 10.dp) // Aligns the text with the bottom of the numbers
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+
+                // The Progress Bar
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { progressRatio },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    color = Color(0xFF005EB8), // The blue filled section
+                    trackColor = Color(0xFFE0E0E0) // The gray empty track
+                )
+                Spacer(Modifier.height(8.dp))
+
+                // Footer Stats
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Used: ${usedPto.toInt()}", fontSize = 12.sp, color = Color.DarkGray, fontWeight = FontWeight.Medium)
+                    Text("Total: ${basePto.toInt()}", fontSize = 12.sp, color = Color.DarkGray, fontWeight = FontWeight.Medium)
+                }
             }
         }
+
+        Spacer(Modifier.height(16.dp))
+
+        // --- 2. NEW APPLY FOR LEAVE CARD ---
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onApply() }, // Makes the whole card a button!
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 4.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // The beautiful gradient background
+                    .background(
+                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(Color(0xFF2E8CE5), Color(0xFF005EB8))
+                        )
+                    )
+                    .padding(vertical = 32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // White Circle Icon
+                    Surface(
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        color = Color.White,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Apply",
+                            tint = Color(0xFF005EB8),
+                            modifier = Modifier.padding(8.dp).fillMaxSize()
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "Apply for Leave",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+
         Spacer(Modifier.height(24.dp))
 
+        // --- 3. UPCOMING LEAVES (Unchanged) ---
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Upcoming Leaves", fontWeight = FontWeight.Bold, fontSize = 18.sp)
             TextButton(onClick = onRecords) { Text("View All") }
@@ -544,9 +784,9 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
         if (upcomingLeaves.isNotEmpty()) {
             upcomingLeaves.forEach { leave ->
                 val typeName = leaveTypes.firstOrNull { it.leaveTypeId == leave.leaveTypeId }?.typeName ?: "Leave"
-                val cal = Calendar.getInstance().apply { timeInMillis = leave.startDate }
+                val cal = java.util.Calendar.getInstance().apply { timeInMillis = leave.startDate }
                 val monthStr = java.text.SimpleDateFormat("MMM", java.util.Locale.getDefault()).format(cal.time).uppercase()
-                val dayStr = cal.get(Calendar.DAY_OF_MONTH).toString()
+                val dayStr = cal.get(java.util.Calendar.DAY_OF_MONTH).toString()
 
                 Card(
                     modifier = Modifier.fillMaxWidth().clickable { onRecords() },
@@ -554,7 +794,6 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
                     elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        // Date Block
                         Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp), color = Color(0xFFF4F6F9)) {
                             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(monthStr, fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
@@ -562,24 +801,20 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
                             }
                         }
                         Spacer(Modifier.width(16.dp))
-
-                        // Middle Text Details
                         Column(Modifier.weight(1f)) {
                             Text(typeName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1C2B36))
                             Spacer(Modifier.height(4.dp))
                             Text("${formatDate(leave.startDate)} - ${formatDate(leave.endDate)} (${leave.totalDuration.toInt()} Days)", color = Color.Gray, fontSize = 12.sp)
                         }
-
-                        // Approved Badge
                         Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), color = Color(0xFF4CFF4C)) {
                             Text("Approved", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1C2B36))
                         }
                     }
                 }
-                Spacer(Modifier.height(12.dp)) // Adds spacing between multiple cards
+                Spacer(Modifier.height(12.dp))
             }
         } else {
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth(), colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White)) {
                 Column(Modifier.padding(24.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("No upcoming approved leaves.", color = Color.Gray)
                 }
@@ -1245,5 +1480,70 @@ fun ProfileAvatar(user: UserEntity, modifier: Modifier = Modifier) {
             modifier = modifier,
             contentScale = androidx.compose.ui.layout.ContentScale.Crop
         )
+    }
+}
+
+@Composable
+fun RecoverySuccessScreen(onReturn: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // --- 1. The Blue Checkmark Circle ---
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(Color(0xFFD3E3FD)), // Light blue background
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "Success",
+                tint = Color(0xFF005EB8), // Deep blue checkmark
+                modifier = Modifier.size(40.dp)
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // --- 2. Title ---
+        Text(
+            text = "Request Submitted",
+            fontWeight = FontWeight.Bold,
+            fontSize = 22.sp,
+            color = Color.Black
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        // --- 3. Subtitle ---
+        Text(
+            text = "Your request has been submitted. Please contact your administrator or wait for further instructions.",
+            color = Color.Gray,
+            fontSize = 14.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            lineHeight = 20.sp,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
+        Spacer(Modifier.height(40.dp))
+
+        // --- 4. Return Button ---
+        Button(
+            onClick = onReturn,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF005EB8) // Deep blue pill button
+            ),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
+        ) {
+            Text("Return to Login", color = Color.White, fontWeight = FontWeight.Medium)
+        }
     }
 }
