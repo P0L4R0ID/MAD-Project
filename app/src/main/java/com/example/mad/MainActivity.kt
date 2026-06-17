@@ -131,6 +131,7 @@ fun AppRoot() {
     var screen by rememberSaveable { mutableStateOf("splash") }
     var activeRejectRecord by remember { mutableStateOf<LeaveApplicationEntity?>(null) }
     var activeDetailRecord by remember { mutableStateOf<LeaveApplicationEntity?>(null) }
+    var detailBackRoute by rememberSaveable { mutableStateOf("records") }
     val recordsList by leaveApplicationDao.getAllApplicationsLive().collectAsState(initial = emptyList())
     var loginError by remember { mutableStateOf<String?>(null) }
 
@@ -274,16 +275,13 @@ fun AppRoot() {
                         userDao = userDao,
                         onWithdraw = { recordToWithdraw ->
                             scope.launch {
-                                withContext(Dispatchers.IO) {
-                                    leaveApplicationDao.deleteApplication(
-                                        recordToWithdraw.applicationId
-                                    )
-                                }
+                                withContext(Dispatchers.IO) { leaveApplicationDao.deleteApplication(recordToWithdraw.applicationId) }
                             }
                         },
                         onBack = { screen = "dashboard" },
                         onRecordClick = { record ->
                             activeDetailRecord = record
+                            detailBackRoute = "records"
                             screen = "detail"
                         }
                     )
@@ -293,7 +291,7 @@ fun AppRoot() {
                     LeaveDetailScreen(
                         record = record,
                         userDao = userDao,
-                        onBack = { screen = "records" }
+                        onBack = { screen = detailBackRoute }
                     )
                 }
 
@@ -316,6 +314,11 @@ fun AppRoot() {
                             }
                             screen = "approveSuccess"
                         }
+                    },
+                    onRecordClick = { record ->
+                        activeDetailRecord = record
+                        detailBackRoute = "approvals"
+                        screen = "detail"
                     },
                     onBack = { screen = "dashboard" }
                 )
@@ -1742,6 +1745,7 @@ fun LeaveApprovalsScreen(
     userDao: UserDao,
     onNavigateToReject: (LeaveApplicationEntity) -> Unit,
     onApprove: (LeaveApplicationEntity) -> Unit,
+    onRecordClick: (LeaveApplicationEntity) -> Unit,
     onBack: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -1775,7 +1779,7 @@ fun LeaveApprovalsScreen(
                     val typeName = leaveTypes.firstOrNull { it.leaveTypeId == record.leaveTypeId }?.typeName ?: "Unknown Leave"
 
                     Card(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().clickable{ onRecordClick(record) },
                         colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color(0xFFF9FAFC)),
                         elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
