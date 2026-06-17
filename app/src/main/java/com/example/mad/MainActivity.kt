@@ -89,16 +89,15 @@ private val seedApplications = listOf(
     LeaveApplicationEntity(2, 101, 2, daysFromNow(-10), daysFromNow(-8), 3.0, "Clinic follow-up", status = ApplicationStatus.APPROVED, managerId = 201, approvalDate = daysFromNow(-9)),
     LeaveApplicationEntity(3, 103, 3, daysFromNow(-2), daysFromNow(0), 3.0, "Insufficient documentation provided.", status = ApplicationStatus.REJECTED, managerId = 201, approvalDate = daysFromNow(-1), rejectReason = "Please attach formal clinic slip."),
 
-    // --- NEW: Manually injected COMPLETED past application! ---
     LeaveApplicationEntity(
         applicationId = 4,
-        employeeId = 101, // 101 is Sarah's ID
-        leaveTypeId = 1, // Annual Leave
-        startDate = daysFromNow(-40), // 40 days ago
-        endDate = daysFromNow(-35), // 35 days ago
+        employeeId = 101,
+        leaveTypeId = 1,
+        startDate = daysFromNow(-40),
+        endDate = daysFromNow(-35),
         totalDuration = 6.0,
         reason = "Holiday trip to Tokyo",
-        status = ApplicationStatus.COMPLETED, // Hardcoded as completed
+        status = ApplicationStatus.COMPLETED,
         managerId = 201,
         approvalDate = daysFromNow(-45)
     )
@@ -137,7 +136,7 @@ fun AppRoot() {
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            // 1. Your existing initialization code
+
             if (userDao.getAllUsers().isEmpty()) {
                 userDao.insertUsers(testAccounts)
                 if (leaveTypeDao.getAllLeaveTypes().isEmpty()) {
@@ -148,26 +147,7 @@ fun AppRoot() {
                 try { leaveApplicationDao.insertApplications(seedApplications) } catch (_: Exception) {}
             }
 
-            // 2. Automated status sweep
             leaveApplicationDao.autoCompletePastLeaves(System.currentTimeMillis())
-
-            // --- 3. THE FIX: Forcefully inject the Tokyo trip! ---
-            try {
-                leaveApplicationDao.insertApplication(
-                    LeaveApplicationEntity(
-                        applicationId = 99, // Using 99 so it doesn't clash with existing IDs
-                        employeeId = 101, // Sarah's ID
-                        leaveTypeId = 1,
-                        startDate = daysFromNow(-40),
-                        endDate = daysFromNow(-35),
-                        totalDuration = 6.0,
-                        reason = "Holiday trip to Tokyo",
-                        status = ApplicationStatus.COMPLETED,
-                        managerId = 201,
-                        approvalDate = daysFromNow(-45)
-                    )
-                )
-            } catch (_: Exception) {}
         }
     }
 
@@ -194,7 +174,6 @@ fun AppRoot() {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            // This ensures it ONLY shows up after logging in!
             if (showBottomBar) {
                 LeaveEaseTopBar(currentUser = currentUser)
             }
@@ -206,7 +185,7 @@ fun AppRoot() {
         Box(Modifier.padding(padding)) {
             when (screen) {
                 "splash" -> SplashScreen(
-                    onTimeout = { screen = "login" } // Automatically routes to login after 1 second!
+                    onTimeout = { screen = "login" }
                 )
 
                 "login" -> LoginScreen(
@@ -225,7 +204,7 @@ fun AppRoot() {
 
                 "recovery" -> PasswordRecoveryScreen(
                     onBack = { screen = "login" },
-                    onSuccess = { screen = "recoverySuccess" } // Goes to our new screen!
+                    onSuccess = { screen = "recoverySuccess" }
                 )
                 "recoverySuccess" -> RecoverySuccessScreen(
                     onReturn = { screen = "login" }
@@ -245,7 +224,6 @@ fun AppRoot() {
                         scope.launch {
                             withContext(Dispatchers.IO) {
                                 val existing = userDao.getUserById(currentUser.userId) ?: return@withContext
-                                // Now it safely edits the row without triggering the CASCADE delete!
                                 userDao.updateUser(existing.copy(fullName = updatedName, phoneNumber = updatedPhone, profilePicture = updatedPhotoPath))
                             }
                             currentUser = currentUser.copy(fullName = updatedName, phoneNumber = updatedPhone, profilePicture = updatedPhotoPath)
@@ -254,7 +232,6 @@ fun AppRoot() {
                     onLogout = { screen = "login" }
                 )
                 "apply" -> {
-                    // Calculate the user's current exact balance
                     val usedPto = recordsList
                         .filter { it.employeeId == currentUser.userId && (it.status == ApplicationStatus.APPROVED || it.status == ApplicationStatus.COMPLETED) }
                         .sumOf { it.totalDuration }
@@ -262,7 +239,6 @@ fun AppRoot() {
 
                     LeaveApplicationScreen(
                         availableBalance = currentBalance,
-                        // Notice the new 'attachedFile' parameter here!
                         onSubmit = { leaveType, startMillis, endMillis, reasonText, attachedFile ->
                             val newId = (recordsList.maxOfOrNull { it.applicationId } ?: 0) + 1
                             val newRecord = LeaveApplicationEntity(
@@ -273,7 +249,7 @@ fun AppRoot() {
                                 endDate = endMillis,
                                 totalDuration = ((endMillis - startMillis) / 86_400_000L + 1).toDouble(),
                                 reason = reasonText,
-                                attachmentPath = attachedFile, // <-- Save the file path to the database!
+                                attachmentPath = attachedFile,
                                 status = ApplicationStatus.PENDING
                             )
                             scope.launch {
@@ -295,7 +271,7 @@ fun AppRoot() {
                         currentUserRole = currentUser.role,
                         currentUserId = currentUser.userId,
                         allRecords = visibleRecords,
-                        userDao = userDao, // <-- NEW: We pass the database helper here!
+                        userDao = userDao,
                         onWithdraw = { recordToWithdraw ->
                             scope.launch {
                                 withContext(Dispatchers.IO) {
@@ -316,7 +292,7 @@ fun AppRoot() {
                 "detail" -> activeDetailRecord?.let { record ->
                     LeaveDetailScreen(
                         record = record,
-                        userDao = userDao, // <-- Add this new line!
+                        userDao = userDao,
                         onBack = { screen = "records" }
                     )
                 }
@@ -338,32 +314,29 @@ fun AppRoot() {
                                     rejectReason = null
                                 )
                             }
-                            // --- NEW: Tell the router to show the success screen! ---
                             screen = "approveSuccess"
                         }
                     },
                     onBack = { screen = "dashboard" }
                 )
 
-                // --- NEW: The Approval Success Route ---
                 "approveSuccess" -> SuccessDialogScreen(
-                    title = "Success!", // Uses the default title
+                    title = "Success!",
                     message = "This application has been approved successfully.",
                     buttonText = "Back to Approval",
-                    onDone = { screen = "approvals" } // Takes them back to the list
+                    onDone = { screen = "approvals" }
                 )
 
                 "reject" -> activeRejectRecord?.let { record ->
-                    // 1. Fetch the employee's exact name from the database
                     var employeeName by remember(record.employeeId) { mutableStateOf("Loading...") }
                     LaunchedEffect(record.employeeId) {
                         userDao.getUserById(record.employeeId)?.let { employeeName = it.fullName }
                     }
 
                     RejectRequestScreen(
-                        applicantName = employeeName, // 2. Pass the fetched name!
+                        applicantName = employeeName,
                         onCancel = { screen = "approvals" },
-                        onConfirm = { reasonString -> // 3. Changed onSubmit to onConfirm!
+                        onConfirm = { reasonString ->
                             scope.launch {
                                 withContext(Dispatchers.IO) {
                                     leaveApplicationDao.updateApplicationStatus(
@@ -387,11 +360,8 @@ fun AppRoot() {
 
 private data class BottomNavItem(val label: String, val route: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
-// --- NEW HELPER: The Splash Screen ---
 @Composable
 fun SplashScreen(onTimeout: () -> Unit) {
-    // This LaunchedEffect runs exactly once when the screen opens.
-    // It waits for 1000 milliseconds (1 second) and then triggers the navigation!
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(1000)
         onTimeout()
@@ -400,11 +370,10 @@ fun SplashScreen(onTimeout: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White), // Clean white background like your mockup
+            .background(Color.White),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Uses the same logo from your Login Screen
         androidx.compose.foundation.Image(
             painter = androidx.compose.ui.res.painterResource(id = R.drawable.leaveease_logo),
             contentDescription = "LeaveEase Logo",
@@ -427,7 +396,6 @@ fun SplashScreen(onTimeout: () -> Unit) {
 fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForgotPassword: () -> Unit) {
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
-    // NEW: We need a state to remember if the password should be shown as text or dots
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
 
     Column(
@@ -437,9 +405,6 @@ fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForg
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-
-        // --- 1. Your Custom Logo ---
-        // Change 'your_logo_name' to the actual name of your image in the res > drawable folder!
         androidx.compose.foundation.Image(
             painter = androidx.compose.ui.res.painterResource(id = R.drawable.leaveease_logo),
             contentDescription = "LeaveEase Logo",
@@ -447,14 +412,12 @@ fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForg
         )
 
         Spacer(Modifier.height(16.dp))
-
-        // --- 2. Title & Subtitle ---
         Text(
             text = "LeaveEase",
             fontWeight = FontWeight.ExtraBold,
             fontSize = 28.sp,
             color = Color.Black,
-            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif // Gives it that classic look from your mockup
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif
         )
         Spacer(Modifier.height(8.dp))
         Text(
@@ -464,8 +427,6 @@ fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForg
         )
 
         Spacer(Modifier.height(40.dp))
-
-        // --- 3. Username Field (External Label) ---
         Text(
             text = "Username",
             modifier = Modifier.fillMaxWidth(),
@@ -485,13 +446,12 @@ fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForg
             shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
             singleLine = true,
             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                unfocusedBorderColor = Color(0xFFE0E0E0) // Gives it that soft, light border when not clicked
+                unfocusedBorderColor = Color(0xFFE0E0E0)
             )
         )
 
         Spacer(Modifier.height(20.dp))
 
-        // --- 4. Password Row (Label + Forgot Password Link) ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -500,7 +460,7 @@ fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForg
             Text("Password", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF333333))
             Text(
                 text = "Forgot Password?",
-                color = Color(0xFF1976D2), // Blue link
+                color = Color(0xFF1976D2),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clickable { onForgotPassword() }
@@ -508,7 +468,6 @@ fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForg
         }
         Spacer(Modifier.height(8.dp))
 
-        // --- 5. Password Field ---
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
@@ -517,7 +476,6 @@ fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForg
                 Icon(Icons.Filled.Lock, contentDescription = "Lock", tint = Color.LightGray)
             },
             trailingIcon = {
-                // A clean, crash-proof text button to toggle the password visibility
                 Text(
                     text = if (passwordVisible) "Hide" else "Show",
                     color = Color.Gray,
@@ -544,17 +502,16 @@ fun LoginScreen(errorMessage: String?, onLogin: (String, String) -> Unit, onForg
         errorMessage?.let { Text(it, color = Color.Red, fontWeight = FontWeight.Medium) }
         Spacer(Modifier.height(24.dp))
 
-        // --- 6. The Login Button ---
         Button(
             onClick = { if (username.isNotBlank() && password.isNotBlank()) onLogin(username.trim(), password) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp), // Taller button to match mockup
+                .height(50.dp),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF005EB8) // Nice deep blue
+                containerColor = Color(0xFF005EB8)
             ),
-            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp) // Adds a tiny drop shadow
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
         ) {
             Text("Login", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
         }
@@ -568,7 +525,6 @@ fun PasswordRecoveryScreen(onBack: () -> Unit, onSuccess: () -> Unit) {
     var email by rememberSaveable { mutableStateOf("") }
     var employeeId by rememberSaveable { mutableStateOf("") }
 
-    // Variable to hold error messages for validation
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
 
     Column(
@@ -646,7 +602,6 @@ fun PasswordRecoveryScreen(onBack: () -> Unit, onSuccess: () -> Unit) {
 
         Spacer(Modifier.height(32.dp))
 
-        // Show the error message if they leave fields blank
         errorMessage?.let {
             Text(
                 text = it,
@@ -659,12 +614,11 @@ fun PasswordRecoveryScreen(onBack: () -> Unit, onSuccess: () -> Unit) {
 
         Button(
             onClick = {
-                // VALIDATION: Check if either box is completely empty
                 if (email.isBlank() || employeeId.isBlank()) {
                     errorMessage = "Please enter both your Email and Employee ID."
                 } else {
-                    errorMessage = null // Clear error
-                    onSuccess() // Navigate to the new success screen!
+                    errorMessage = null
+                    onSuccess()
                 }
             },
             modifier = Modifier
@@ -700,10 +654,10 @@ fun LeaveEaseTopBar(currentUser: UserEntity) {
             Text(
                 text = "LeaveEase",
                 color = Color(0xFF0277BD),
-                fontWeight = FontWeight.ExtraBold, // Makes it pop as a logo
-                fontSize = 24.sp, // Slightly larger to anchor the top bar
-                letterSpacing = 1.sp, // Spreads the letters out slightly for a premium feel
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Serif // Matches your Login screen perfectly!
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 24.sp,
+                letterSpacing = 1.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Serif
             )
         },
         actions = {
@@ -714,7 +668,7 @@ fun LeaveEaseTopBar(currentUser: UserEntity) {
                     .padding(end = 16.dp)
                     .size(36.dp)
             ) {
-                // We drop our new helper right here!
+
                 ProfileAvatar(user = currentUser, modifier = Modifier.fillMaxSize())
             }
         },
@@ -731,10 +685,7 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
         .sumOf { it.totalDuration }
 
     val balance = basePto - usedPto
-
-    // Calculate the percentage for the progress bar (between 0.0 and 1.0)
     val progressRatio = if (basePto > 0) (balance / basePto).toFloat().coerceIn(0f, 1f) else 0f
-
     val upcomingLeaves = records
         .filter { it.employeeId == userId && it.status == ApplicationStatus.APPROVED && it.endDate >= System.currentTimeMillis() }
         .sortedBy { it.startDate }
@@ -744,7 +695,6 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
         Text("Welcome back, $userName", fontWeight = FontWeight.Bold, fontSize = 20.sp)
         Spacer(Modifier.height(16.dp))
 
-        // --- 1. NEW PTO BALANCE CARD ---
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
@@ -752,7 +702,6 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
             shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
         ) {
             Column(Modifier.padding(20.dp)) {
-                // Header Row with Icon
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -773,39 +722,35 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-
-                // Big Number Row
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
                         text = "${balance.toInt()}",
                         fontSize = 48.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF005EB8),
-                        lineHeight = 48.sp // Keeps the giant text from pushing margins down
+                        lineHeight = 48.sp
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
                         text = "Days Available",
                         fontSize = 13.sp,
                         color = Color.DarkGray,
-                        modifier = Modifier.padding(bottom = 10.dp) // Aligns the text with the bottom of the numbers
+                        modifier = Modifier.padding(bottom = 10.dp)
                     )
                 }
                 Spacer(Modifier.height(16.dp))
 
-                // The Progress Bar
                 androidx.compose.material3.LinearProgressIndicator(
                     progress = { progressRatio },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(8.dp)
                         .clip(RoundedCornerShape(4.dp)),
-                    color = Color(0xFF005EB8), // The blue filled section
-                    trackColor = Color(0xFFE0E0E0) // The gray empty track
+                    color = Color(0xFF005EB8),
+                    trackColor = Color(0xFFE0E0E0)
                 )
                 Spacer(Modifier.height(8.dp))
 
-                // Footer Stats
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -818,18 +763,16 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
 
         Spacer(Modifier.height(16.dp))
 
-        // --- 2. NEW APPLY FOR LEAVE CARD ---
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onApply() }, // Makes the whole card a button!
+                .clickable { onApply() },
             shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
             elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // The beautiful gradient background
                     .background(
                         brush = androidx.compose.ui.graphics.Brush.verticalGradient(
                             colors = listOf(Color(0xFF2E8CE5), Color(0xFF005EB8))
@@ -839,7 +782,6 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    // White Circle Icon
                     Surface(
                         shape = androidx.compose.foundation.shape.CircleShape,
                         color = Color.White,
@@ -865,7 +807,6 @@ fun EmployeeProfileScreen(userName: String, userId: Int, basePto: Double, record
 
         Spacer(Modifier.height(24.dp))
 
-        // --- 3. UPCOMING LEAVES (Unchanged) ---
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Upcoming Leaves", fontWeight = FontWeight.Bold, fontSize = 18.sp)
             TextButton(onClick = onRecords) { Text("View All") }
@@ -922,7 +863,6 @@ fun EditProfileScreen(currentUser: UserEntity, onSave: (String, String, String?)
     var phoneNumber by rememberSaveable { mutableStateOf(currentUser.phoneNumber) }
     var profilePicturePath by rememberSaveable { mutableStateOf(currentUser.profilePicture) }
 
-    // THE GALLERY LAUNCHER
     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
@@ -939,26 +879,23 @@ fun EditProfileScreen(currentUser: UserEntity, onSave: (String, String, String?)
     }
 
     if (isEditing) {
-        // --- THE MODERNIZED EDIT VIEW ---
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFF8F9FA)) // Very subtle off-white background
+                .background(Color(0xFFF8F9FA))
                 .padding(16.dp)
         ) {
             Spacer(Modifier.height(8.dp))
 
-            // Top Soft Grey Card
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                color = Color(0xFFE4E6EB) // Matches the muted blue-grey from your mockup
+                color = Color(0xFFE4E6EB)
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Avatar with a tiny white border to make it pop
                     Surface(
                         shape = androidx.compose.foundation.shape.CircleShape,
                         modifier = Modifier.size(80.dp),
@@ -1021,31 +958,29 @@ fun EditProfileScreen(currentUser: UserEntity, onSave: (String, String, String?)
 
             Spacer(Modifier.height(32.dp))
 
-            val slateBlueColor = Color(0xFF506489) // The specific slate blue from your mockup
+            val slateBlueColor = Color(0xFF506489)
 
             Button(
                 onClick = { if (fullName.isNotBlank()) onSave(fullName, phoneNumber, profilePicturePath); isEditing = false },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp), // Back to standard rounded corners
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp), // Adds that subtle drop shadow
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005EB8)) // Your brand's deep blue
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005EB8))
             ) {
                 Text("Save Changes", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color.White)
             }
 
             Spacer(Modifier.height(8.dp))
 
-            // --- Secondary Text-Only Cancel Button ---
             TextButton(
                 onClick = { fullName = currentUser.fullName; phoneNumber = currentUser.phoneNumber; profilePicturePath = currentUser.profilePicture; isEditing = false },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
-                colors = ButtonDefaults.textButtonColors(contentColor = Color.Gray) // Makes the text a clean gray
+                colors = ButtonDefaults.textButtonColors(contentColor = Color.Gray)
             ) {
                 Text("Cancel", fontSize = 15.sp, fontWeight = FontWeight.Medium)
             }
         }
     } else {
-        // --- THE PROFILE VIEW DESIGN (Unchanged from our last fix) ---
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1055,7 +990,6 @@ fun EditProfileScreen(currentUser: UserEntity, onSave: (String, String, String?)
         ) {
             Spacer(Modifier.height(8.dp))
 
-            // --- 1. TOP PROFILE CARD ---
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
@@ -1093,7 +1027,6 @@ fun EditProfileScreen(currentUser: UserEntity, onSave: (String, String, String?)
 
             Spacer(Modifier.height(20.dp))
 
-            // --- 2. DETAIL CARDS ---
             Card(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
                 colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
@@ -1151,7 +1084,6 @@ fun EditProfileScreen(currentUser: UserEntity, onSave: (String, String, String?)
                 }
             }
 
-            // --- 3. ACTION BUTTONS ---
             Button(
                 onClick = { isEditing = true },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -1248,17 +1180,15 @@ fun LeaveApplicationScreen(
     if (showStartPicker) { DatePickerDialog(onDismissRequest = { showStartPicker = false }, confirmButton = { TextButton(onClick = { startPickerState.selectedDateMillis?.let { start = it.toString() }; showStartPicker = false }) { Text("OK") } }, dismissButton = { TextButton(onClick = { showStartPicker = false }) { Text("Cancel") } }) { DatePicker(state = startPickerState) } }
     if (showEndPicker) { DatePickerDialog(onDismissRequest = { showEndPicker = false }, confirmButton = { TextButton(onClick = { endPickerState.selectedDateMillis?.let { end = it.toString() }; showEndPicker = false }) { Text("OK") } }, dismissButton = { TextButton(onClick = { showEndPicker = false }) { Text("Cancel") } }) { DatePicker(state = endPickerState) } }
 
-    // --- MAIN UI LAYOUT ---
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF4F7FA)) // Soft gray background for the whole screen
+            .background(Color(0xFFF4F7FA))
             .padding(horizontal = 16.dp)
-            .verticalScroll(rememberScrollState()) // Makes it scrollable!
+            .verticalScroll(rememberScrollState())
     ) {
         Spacer(Modifier.height(24.dp))
 
-        // Header
         Text("Leave Application Form", fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = Color(0xFF1C2B36))
         Spacer(Modifier.height(4.dp))
         Text("Available PTO Balance: ", color = Color.Gray, fontSize = 14.sp)
@@ -1266,7 +1196,6 @@ fun LeaveApplicationScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // --- CARD 1: Leave Type ---
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
@@ -1282,7 +1211,7 @@ fun LeaveApplicationScreen(
                         onValueChange = {},
                         modifier = Modifier.fillMaxWidth().clickable { expanded = true },
                         readOnly = true,
-                        enabled = false, // Disables typing but allows clicking the box
+                        enabled = false,
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
                             disabledTextColor = Color.Black,
                             disabledBorderColor = Color(0xFFE0E0E0),
@@ -1302,7 +1231,6 @@ fun LeaveApplicationScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // --- CARD 2: Duration ---
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
@@ -1338,13 +1266,12 @@ fun LeaveApplicationScreen(
                     trailingIcon = { Icon(Icons.Default.DateRange, contentDescription = "Calendar", tint = Color(0xFF005EB8)) }
                 )
 
-                // Dynamic Duration Highlight
                 if (automatedDays > 0) {
                     Spacer(Modifier.height(16.dp))
                     val isExceeding = automatedDays > availableBalance
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        color = if (isExceeding) Color(0xFFFFEBEE) else Color(0xFFEAF2FF), // Light red or Light blue
+                        color = if (isExceeding) Color(0xFFFFEBEE) else Color(0xFFEAF2FF),
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
                     ) {
                         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1367,7 +1294,6 @@ fun LeaveApplicationScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // --- CARD 3: Reason & Attachments ---
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
@@ -1390,7 +1316,6 @@ fun LeaveApplicationScreen(
 
                 Spacer(Modifier.height(16.dp))
 
-                // Redesigned File Upload Button
                 OutlinedButton(
                     onClick = { fileLauncher.launch("*/*") },
                     modifier = Modifier.fillMaxWidth().height(50.dp),
@@ -1407,7 +1332,6 @@ fun LeaveApplicationScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // --- FOOTER: Actions ---
         error?.let {
             Text(it, color = Color(0xFFD32F2F), fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             Spacer(Modifier.height(8.dp))
@@ -1439,7 +1363,7 @@ fun LeaveApplicationScreen(
             Text("Cancel", color = Color.Gray, fontWeight = FontWeight.Medium)
         }
 
-        Spacer(Modifier.height(32.dp)) // Extra padding for the bottom of the scroll
+        Spacer(Modifier.height(32.dp))
     }
 }
 
@@ -1457,36 +1381,32 @@ fun SuccessDialogScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // --- 1. The Green Checkmark Badge ---
         Box(
             modifier = Modifier
                 .size(80.dp)
-                // Note: You already added the 'clip' import earlier, so this will work perfectly!
                 .clip(CircleShape)
-                .background(Color(0xFFE8F5E9)), // Soft light green background
+                .background(Color(0xFFE8F5E9)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = "Success",
-                tint = Color(0xFF4CAF50), // Bold solid green checkmark
+                tint = Color(0xFF4CAF50),
                 modifier = Modifier.size(40.dp)
             )
         }
 
         Spacer(Modifier.height(24.dp))
 
-        // --- 2. The Title ---
         Text(
             text = title,
             fontWeight = FontWeight.Bold,
             fontSize = 24.sp,
-            color = Color(0xFF1C2B36) // Dark crisp text
+            color = Color(0xFF1C2B36)
         )
 
         Spacer(Modifier.height(12.dp))
 
-        // --- 3. The Subtitle / Message ---
         Text(
             text = message,
             color = Color.Gray,
@@ -1497,16 +1417,15 @@ fun SuccessDialogScreen(
 
         Spacer(Modifier.height(40.dp))
 
-        // --- 4. The Action Button ---
         Button(
             onClick = onDone,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp), // Taller, more clickable button
+                .height(48.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF005EB8) // Your brand's deep blue
+                containerColor = Color(0xFF005EB8)
             ),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp) // Nice soft corners
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
         ) {
             Text(buttonText, color = Color.White, fontWeight = FontWeight.Medium)
         }
@@ -1519,7 +1438,7 @@ fun LeaveRecordsScreen(
     currentUserRole: UserRole,
     currentUserId: Int,
     allRecords: List<LeaveApplicationEntity>,
-    userDao: UserDao, // <-- NEW: Added UserDao here!
+    userDao: UserDao,
     onWithdraw: (LeaveApplicationEntity) -> Unit,
     onBack: () -> Unit,
     onRecordClick: (LeaveApplicationEntity) -> Unit
@@ -1547,20 +1466,18 @@ fun LeaveRecordsScreen(
         }
 
         if (visibleParentTab == 0) {
-            // 1. The Pill Filters
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp) // Keeps a nice gap between the even buttons
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 val filters = listOf("All Decisions", "Approved", "Rejected")
                 filters.forEachIndexed { index, title ->
                     val isSelected = approvalTab == index
 
-                    // NEW: Dynamic color logic based on the button!
                     val activeColor = when (index) {
-                        1 -> Color(0xFF2E7D32) // Bold Green for Approved
-                        2 -> Color(0xFFD32F2F) // Bold Red for Rejected
-                        else -> Color(0xFF005EB8) // Standard Blue for All Decisions
+                        1 -> Color(0xFF2E7D32)
+                        2 -> Color(0xFFD32F2F)
+                        else -> Color(0xFF005EB8)
                     }
 
                     Surface(
@@ -1568,17 +1485,16 @@ fun LeaveRecordsScreen(
                         color = if (isSelected) activeColor else Color.White,
                         border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE0E0E0)),
                         modifier = Modifier
-                            .weight(1f) // <-- This magic line makes all 3 buttons exactly equal width!
+                            .weight(1f)
                             .clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
                             .clickable { approvalTab = index }
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center, // Centers the text inside the button
+                            horizontalArrangement = Arrangement.Center,
                             modifier = Modifier.padding(vertical = 10.dp)
                         ) {
                             if (isSelected) {
-                                // Swap to an "X" icon for the rejected tab
                                 val icon = if (index == 2) Icons.Default.Close else Icons.Default.Check
                                 Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(4.dp))
@@ -1586,9 +1502,9 @@ fun LeaveRecordsScreen(
                             Text(
                                 text = title,
                                 color = if (isSelected) Color.White else Color.DarkGray,
-                                fontSize = 12.sp, // Slightly smaller text so it fits perfectly on smaller phones
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                maxLines = 1 // Prevents text from stacking onto two lines
+                                maxLines = 1
                             )
                         }
                     }
@@ -1604,7 +1520,6 @@ fun LeaveRecordsScreen(
 
             LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxSize()) {
                 items(filtered) { record ->
-                    // --- NEW: Pass the userDao into the card ---
                     ApprovalHistoryCard(record = record, userDao = userDao, onRecordClick = onRecordClick)
                 }
                 item { Spacer(Modifier.height(24.dp)) }
@@ -1640,7 +1555,6 @@ fun LeaveRecordsScreen(
 fun LeaveDetailScreen(record: LeaveApplicationEntity, userDao: UserDao, onBack: () -> Unit) {
     val context = LocalContext.current
 
-    // --- NEW: Fetch the employee's name from the database ---
     var employeeName by remember(record.employeeId) { mutableStateOf("Loading...") }
     LaunchedEffect(record.employeeId) {
         userDao.getUserById(record.employeeId)?.let { employeeName = it.fullName }
@@ -1671,7 +1585,6 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, userDao: UserDao, onBack: 
         }
         Spacer(Modifier.height(24.dp))
 
-        // --- NEW: APPLICANT INFO UI ---
         Text("APPLICANT", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Text(employeeName, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF1C2B36))
         Text("Employee ID: EE-${record.employeeId}", color = Color(0xFF546E7A), fontSize = 14.sp)
@@ -1699,7 +1612,6 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, userDao: UserDao, onBack: 
 
         Spacer(Modifier.height(24.dp))
 
-        // --- THE ATTACHMENT UI BLOCK ---
         if (record.attachmentPath != null) {
             val fileName = java.io.File(record.attachmentPath).name
 
@@ -1752,7 +1664,6 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, userDao: UserDao, onBack: 
             Spacer(Modifier.height(16.dp))
         }
 
-        // --- THE DOWNLOAD PDF BUTTON ---
         Button(
             onClick = {
                 try {
@@ -1772,7 +1683,6 @@ fun LeaveDetailScreen(record: LeaveApplicationEntity, userDao: UserDao, onBack: 
                     }
 
                     canvas.drawText("LeaveEase Application Report", 50f, 80f, titlePaint)
-                    // We added the employee name to the PDF download here too!
                     canvas.drawText("Applicant: $employeeName (EE-${record.employeeId})", 50f, 130f, textPaint)
                     canvas.drawText("Reference ID: #${record.applicationId}", 50f, 170f, textPaint)
                     canvas.drawText("Leave Type: $typeName", 50f, 210f, textPaint)
@@ -1836,7 +1746,6 @@ fun LeaveApprovalsScreen(
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
 
-        // 1. Centered and larger title
         Text(
             text = "Pending Approvals",
             fontWeight = FontWeight.ExtraBold,
@@ -1847,7 +1756,6 @@ fun LeaveApprovalsScreen(
         )
         Spacer(Modifier.height(20.dp))
 
-        // Made the list scrollable so it doesn't break on small screens
         Column(
             modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -1874,11 +1782,9 @@ fun LeaveApprovalsScreen(
                     ) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
-                            // Header: Name and ID (Icon Removed!)
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(applicantName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1C2B36))
-                                    // 2. Changed "Team Member" to Employee ID
                                     Text("Employee ID: ${record.employeeId}", color = Color.Gray, fontSize = 13.sp)
                                 }
                                 Spacer(Modifier.width(8.dp))
@@ -1949,7 +1855,6 @@ fun LeaveApprovalsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // Slightly updated back button to match modern styling
         Button(
             onClick = onBack,
             modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -1976,12 +1881,12 @@ fun RejectRequestScreen(
             .background(Color.White)
             .padding(24.dp)
     ) {
-        // --- 1. Header Row (Icon + Title) ---
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                imageVector = Icons.Default.Info, // A built-in icon that works well here
+                imageVector = Icons.Default.Info,
                 contentDescription = "Reject",
-                tint = Color(0xFFC62828), // Deep Red
+                tint = Color(0xFFC62828),
                 modifier = Modifier.size(24.dp)
             )
             Spacer(Modifier.width(8.dp))
@@ -1995,7 +1900,6 @@ fun RejectRequestScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // --- 2. Dynamic Subtitle (With bold applicant name) ---
         val subtitle = androidx.compose.ui.text.buildAnnotatedString {
             append("You are about to reject the leave request for ")
             withStyle(style = androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = Color.Black)) {
@@ -2012,7 +1916,6 @@ fun RejectRequestScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // --- 3. Text Input Area ---
         Text(
             text = "Reason (Required)",
             fontSize = 14.sp,
@@ -2024,23 +1927,22 @@ fun RejectRequestScreen(
             value = reason,
             onValueChange = {
                 reason = it
-                if (it.isNotBlank()) isError = false // Clear error when they start typing
+                if (it.isNotBlank()) isError = false
             },
             placeholder = { Text("E.g., Project deadline conflict...", color = Color.Gray) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(120.dp), // Makes it a nice big text box
+                .height(120.dp),
             isError = isError,
             shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color(0xFFF4F6F9), // Light blue-gray background
+                unfocusedContainerColor = Color(0xFFF4F6F9),
                 focusedContainerColor = Color(0xFFF4F6F9),
                 unfocusedBorderColor = Color(0xFFE0E0E0),
-                focusedBorderColor = Color(0xFF005EB8) // Blue border when typing
+                focusedBorderColor = Color(0xFF005EB8)
             )
         )
 
-        // Show a warning if they try to submit without typing a reason
         if (isError) {
             Text(
                 text = "A reason is required to reject an application.",
@@ -2052,7 +1954,6 @@ fun RejectRequestScreen(
 
         Spacer(Modifier.height(32.dp))
 
-        // --- 4. Action Buttons ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
@@ -2070,13 +1971,13 @@ fun RejectRequestScreen(
             Button(
                 onClick = {
                     if (reason.isBlank()) {
-                        isError = true // Trigger the error message if empty
+                        isError = true
                     } else {
                         onConfirm(reason)
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)), // Match the red header
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), // Pill shape
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp, vertical = 12.dp)
             ) {
                 Text("Confirm Rejection", color = Color.White, fontWeight = FontWeight.Medium)
@@ -2092,19 +1993,16 @@ private fun formatDate(timeInMillis: Long): String {
 
 @Composable
 fun ProfileAvatar(user: UserEntity, modifier: Modifier = Modifier) {
-    // 1. Set the default fallback images
     val fallbackRes = when (user.userName) {
-        "sarah" -> R.drawable.sarah // Change this if you named the file differently
-        "david" -> R.drawable.david // Change this if you named the file differently
+        "sarah" -> R.drawable.sarah
+        "david" -> R.drawable.david
         else -> android.R.drawable.ic_menu_camera
     }
 
-    // 2. Remember the custom image bitmap
     var bitmap by remember(user.profilePicture) {
         mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
     }
 
-    // 3. Try to load the custom image from internal storage
     LaunchedEffect(user.profilePicture) {
         if (user.profilePicture != null) {
             try {
@@ -2117,7 +2015,6 @@ fun ProfileAvatar(user: UserEntity, modifier: Modifier = Modifier) {
         }
     }
 
-    // 4. Draw either the custom image or the default one
     if (bitmap != null) {
         androidx.compose.foundation.Image(
             bitmap = bitmap!!,
@@ -2144,25 +2041,23 @@ fun RecoverySuccessScreen(onReturn: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // --- 1. The Blue Checkmark Circle ---
         Box(
             modifier = Modifier
                 .size(80.dp)
                 .clip(androidx.compose.foundation.shape.CircleShape)
-                .background(Color(0xFFD3E3FD)), // Light blue background
+                .background(Color(0xFFD3E3FD)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = "Success",
-                tint = Color(0xFF005EB8), // Deep blue checkmark
+                tint = Color(0xFF005EB8),
                 modifier = Modifier.size(40.dp)
             )
         }
 
         Spacer(Modifier.height(24.dp))
 
-        // --- 2. Title ---
         Text(
             text = "Request Submitted",
             fontWeight = FontWeight.Bold,
@@ -2172,7 +2067,6 @@ fun RecoverySuccessScreen(onReturn: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
-        // --- 3. Subtitle ---
         Text(
             text = "Your request has been submitted. Please contact your administrator or wait for further instructions.",
             color = Color.Gray,
@@ -2184,14 +2078,13 @@ fun RecoverySuccessScreen(onReturn: () -> Unit) {
 
         Spacer(Modifier.height(40.dp))
 
-        // --- 4. Return Button ---
         Button(
             onClick = onReturn,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF005EB8) // Deep blue pill button
+                containerColor = Color(0xFF005EB8)
             ),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
         ) {
@@ -2200,21 +2093,17 @@ fun RecoverySuccessScreen(onReturn: () -> Unit) {
     }
 }
 
-// --- NEW HELPER: The Beautiful Card Design ---
-// --- NEW HELPER: The Beautiful Card Design ---
 @Composable
 fun RecordCard(
     record: LeaveApplicationEntity,
     onWithdraw: ((LeaveApplicationEntity) -> Unit)?,
     onRecordClick: (LeaveApplicationEntity) -> Unit
 ) {
-    // Formatting the date to match "Feb 05, 2024"
     val dateFormatter = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault())
     val startStr = dateFormatter.format(java.util.Date(record.startDate))
     val endStr = dateFormatter.format(java.util.Date(record.endDate))
     val dateDisplay = if (startStr == endStr) startStr else "$startStr - $endStr"
 
-    // Configuring specific colors for the status pills
     val (statusBg, statusText, statusLabel) = when(record.status) {
         ApplicationStatus.PENDING -> Triple(Color(0xFFFDECC8), Color(0xFFD97706), "Pending")
         ApplicationStatus.APPROVED -> Triple(Color(0xFFD0E4FF), Color(0xFF005EB8), "Approved")
@@ -2231,7 +2120,6 @@ fun RecordCard(
         shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
-            // Row 1: Title and Status Pill
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
                     Text(typeName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1C2B36))
@@ -2251,7 +2139,6 @@ fun RecordCard(
 
             Spacer(Modifier.height(12.dp))
 
-            // Row 2: Duration with Calendar Icon
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.DateRange, contentDescription = "Duration", tint = Color.Gray, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
@@ -2260,14 +2147,12 @@ fun RecordCard(
 
             Spacer(Modifier.height(12.dp))
 
-            // Row 3: Employee's Application Reason Preview
             Text(record.reason, color = Color(0xFF333333), fontSize = 14.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
 
-            // --- NEW: Row 3.5 - The Manager's Rejection Reason ---
             if (record.status == ApplicationStatus.REJECTED && !record.rejectReason.isNullOrBlank()) {
                 Spacer(Modifier.height(12.dp))
                 Surface(
-                    color = Color(0xFFFFEBEE), // Soft red background
+                    color = Color(0xFFFFEBEE),
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -2288,7 +2173,6 @@ fun RecordCard(
                 }
             }
 
-            // Conditional Row 4: The Withdraw Button (Only shows for Pending!)
             if (record.status == ApplicationStatus.PENDING && onWithdraw != null) {
                 Spacer(Modifier.height(12.dp))
                 androidx.compose.material3.HorizontalDivider(color = Color(0xFFF0F0F0))
@@ -2308,14 +2192,13 @@ fun RecordCard(
     }
 }
 
-// --- NEW HELPER: Manager Approval History Card ---
+
 @Composable
 fun ApprovalHistoryCard(
     record: LeaveApplicationEntity,
-    userDao: UserDao, // <-- NEW: Added UserDao here!
+    userDao: UserDao,
     onRecordClick: (LeaveApplicationEntity) -> Unit
 ) {
-    // Fetch the employee's exact name from the database!
     var employeeName by remember(record.employeeId) { mutableStateOf("Loading...") }
     LaunchedEffect(record.employeeId) {
         userDao.getUserById(record.employeeId)?.let { employeeName = it.fullName }
@@ -2337,18 +2220,14 @@ fun ApprovalHistoryCard(
         shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
     ) {
         Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-            // Left Accent Border
             Box(Modifier.width(4.dp).fillMaxHeight().background(accentColor))
 
             Column(Modifier.padding(16.dp).weight(1f)) {
-
-                // --- REDESIGNED HEADER: Real Name, ID, and Status (No Icon) ---
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(employeeName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF1C2B36))
                         Text("Employee ID: ${record.employeeId}", color = Color.Gray, fontSize = 13.sp)
                     }
-                    // Status Pill
                     Surface(color = statusBg, shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp), border = androidx.compose.foundation.BorderStroke(1.dp, accentColor.copy(alpha = 0.3f))) {
                         Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(if (isApproved) Icons.Default.Check else Icons.Default.Close, contentDescription = null, tint = statusContent, modifier = Modifier.size(12.dp))
@@ -2360,7 +2239,6 @@ fun ApprovalHistoryCard(
 
                 Spacer(Modifier.height(16.dp))
 
-                // Inner Gray Box for Details
                 Surface(color = Color(0xFFF4F6F9), shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2382,7 +2260,6 @@ fun ApprovalHistoryCard(
                 androidx.compose.material3.HorizontalDivider(color = Color(0xFFF0F0F0))
                 Spacer(Modifier.height(12.dp))
 
-                // Footer: Decision Date and Arrow
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Info, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
