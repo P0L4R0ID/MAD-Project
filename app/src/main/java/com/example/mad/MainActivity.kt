@@ -700,8 +700,10 @@ fun LeaveEaseTopBar(currentUser: UserEntity) {
             Text(
                 text = "LeaveEase",
                 color = Color(0xFF0277BD),
-                fontWeight = FontWeight.Bold,
-                fontSize = 22.sp
+                fontWeight = FontWeight.ExtraBold, // Makes it pop as a logo
+                fontSize = 24.sp, // Slightly larger to anchor the top bar
+                letterSpacing = 1.sp, // Spreads the letters out slightly for a premium feel
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Serif // Matches your Login screen perfectly!
             )
         },
         actions = {
@@ -920,7 +922,7 @@ fun EditProfileScreen(currentUser: UserEntity, onSave: (String, String, String?)
     var phoneNumber by rememberSaveable { mutableStateOf(currentUser.phoneNumber) }
     var profilePicturePath by rememberSaveable { mutableStateOf(currentUser.profilePicture) }
 
-    // THE GALLERY LAUNCHER: Opens the phone's gallery and copies the selected image to safe internal storage
+    // THE GALLERY LAUNCHER
     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
@@ -932,74 +934,247 @@ fun EditProfileScreen(currentUser: UserEntity, onSave: (String, String, String?)
                     input.copyTo(output)
                 }
             }
-            profilePicturePath = file.absolutePath // Save the path!
+            profilePicturePath = file.absolutePath
         }
     }
 
     if (isEditing) {
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
+        // --- THE MODERNIZED EDIT VIEW ---
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFFF8F9FA)) // Very subtle off-white background
+                .padding(16.dp)
+        ) {
             Spacer(Modifier.height(8.dp))
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
 
-                    // Show the Avatar!
-                    Surface(shape = androidx.compose.foundation.shape.CircleShape, modifier = Modifier.size(80.dp)) {
-                        // Pass a temporary UserEntity with the new photo path so it previews instantly
+            // Top Soft Grey Card
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                color = Color(0xFFE4E6EB) // Matches the muted blue-grey from your mockup
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Avatar with a tiny white border to make it pop
+                    Surface(
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        modifier = Modifier.size(80.dp),
+                        border = androidx.compose.foundation.BorderStroke(2.dp, Color.White)
+                    ) {
                         ProfileAvatar(user = currentUser.copy(profilePicture = profilePicturePath), modifier = Modifier.fillMaxSize())
                     }
+
                     Spacer(Modifier.height(12.dp))
 
-                    // Make the text clickable to launch the gallery
                     Text(
                         text = "CHANGE PHOTO",
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF1976D2),
+                        fontSize = 13.sp,
                         modifier = Modifier.clickable { launcher.launch("image/*") }
                     )
 
                     Spacer(Modifier.height(16.dp))
-                    Text("Personal Details", fontWeight = FontWeight.Bold)
-                    Text("Update your account information and contact details.")
+
+                    Text("Personal Details", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF333333))
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "Update your account information and contact details.",
+                        color = Color(0xFF555555),
+                        fontSize = 13.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        lineHeight = 18.sp
+                    )
                 }
             }
+
+            Spacer(Modifier.height(24.dp))
+
+            OutlinedTextField(
+                value = fullName,
+                onValueChange = { fullName = it },
+                label = { Text("Full Name", color = Color.Gray) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    unfocusedBorderColor = Color.Gray,
+                    focusedBorderColor = Color(0xFF506489)
+                )
+            )
+
             Spacer(Modifier.height(16.dp))
-            OutlinedTextField(value = fullName, onValueChange = { fullName = it }, label = { Text("Full Name") }, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(value = phoneNumber, onValueChange = { phoneNumber = it }, label = { Text("Phone Number") }, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(16.dp))
-            // Pass the new photo path into the Save button!
-            Button(onClick = { if (fullName.isNotBlank()) onSave(fullName, phoneNumber, profilePicturePath); isEditing = false }, modifier = Modifier.fillMaxWidth()) { Text("Save Changes") }
+
+            OutlinedTextField(
+                value = phoneNumber,
+                onValueChange = { phoneNumber = it },
+                label = { Text("Phone Number", color = Color.Gray) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    unfocusedBorderColor = Color.Gray,
+                    focusedBorderColor = Color(0xFF506489)
+                )
+            )
+
+            Spacer(Modifier.height(32.dp))
+
+            val slateBlueColor = Color(0xFF506489) // The specific slate blue from your mockup
+
+            Button(
+                onClick = { if (fullName.isNotBlank()) onSave(fullName, phoneNumber, profilePicturePath); isEditing = false },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp), // Back to standard rounded corners
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp), // Adds that subtle drop shadow
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005EB8)) // Your brand's deep blue
+            ) {
+                Text("Save Changes", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color.White)
+            }
+
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { fullName = currentUser.fullName; phoneNumber = currentUser.phoneNumber; profilePicturePath = currentUser.profilePicture; isEditing = false }, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+
+            // --- Secondary Text-Only Cancel Button ---
+            TextButton(
+                onClick = { fullName = currentUser.fullName; phoneNumber = currentUser.phoneNumber; profilePicturePath = currentUser.profilePicture; isEditing = false },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = Color.Gray) // Makes the text a clean gray
+            ) {
+                Text("Cancel", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            }
         }
     } else {
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
+        // --- THE PROFILE VIEW DESIGN (Unchanged from our last fix) ---
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFFF4F7FA))
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
             Spacer(Modifier.height(8.dp))
-            Card(Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
 
-                    // Show the Avatar!
-                    Surface(shape = androidx.compose.foundation.shape.CircleShape, modifier = Modifier.size(80.dp)) {
+            // --- 1. TOP PROFILE CARD ---
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
+                elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Surface(shape = androidx.compose.foundation.shape.CircleShape, modifier = Modifier.size(88.dp)) {
                         ProfileAvatar(user = currentUser, modifier = Modifier.fillMaxSize())
                     }
-
-                    Spacer(Modifier.height(12.dp))
-                    Text(currentUser.fullName, fontWeight = FontWeight.Bold)
-                    Text(currentUser.role.name)
-                    Spacer(Modifier.height(12.dp))
-                    Button(onClick = {}) { Text("Active") }
+                    Spacer(Modifier.height(16.dp))
+                    Text(currentUser.fullName, fontWeight = FontWeight.Bold, fontSize = 22.sp, color = Color(0xFF1C2B36))
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.Gray)
+                        Spacer(Modifier.width(6.dp))
+                        Text(currentUser.role.name.lowercase().replaceFirstChar { it.uppercase() }, color = Color.Gray, fontSize = 14.sp)
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Surface(
+                        color = Color(0xFFEAF2FF),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+                    ) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF005EB8), modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Active", color = Color(0xFF005EB8), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
             }
-            Spacer(Modifier.height(16.dp))
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) { Text("Email Address"); Text(currentUser.email) } }
-            Spacer(Modifier.height(8.dp))
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) { Text("Employee ID"); Text("EE-${currentUser.userId}") } }
-            Spacer(Modifier.height(8.dp))
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) { Text("Phone Number"); Text(currentUser.phoneNumber) } }
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = { isEditing = true }, modifier = Modifier.fillMaxWidth()) { Text("Edit Profile") }
-            Spacer(Modifier.height(8.dp))
-            Button(onClick = onLogout, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("Log Out", color = Color.White) }
+
+            Spacer(Modifier.height(20.dp))
+
+            // --- 2. DETAIL CARDS ---
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
+                elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 1.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+            ) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = androidx.compose.foundation.shape.CircleShape, color = Color(0xFFF4F6F9), modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Default.Email, contentDescription = null, tint = Color.DarkGray, modifier = Modifier.padding(10.dp))
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text("Email Address", color = Color.Gray, fontSize = 12.sp)
+                        Spacer(Modifier.height(2.dp))
+                        Text(currentUser.email, color = Color(0xFF1C2B36), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
+                elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 1.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+            ) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = androidx.compose.foundation.shape.CircleShape, color = Color(0xFFF4F6F9), modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Default.AccountBox, contentDescription = null, tint = Color.DarkGray, modifier = Modifier.padding(10.dp))
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text("Employee ID", color = Color.Gray, fontSize = 12.sp)
+                        Spacer(Modifier.height(2.dp))
+                        Text("EE-${currentUser.userId}", color = Color(0xFF1C2B36), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White),
+                elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 1.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+            ) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = androidx.compose.foundation.shape.CircleShape, color = Color(0xFFF4F6F9), modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Default.Phone, contentDescription = null, tint = Color.DarkGray, modifier = Modifier.padding(10.dp))
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text("Phone Number", color = Color.Gray, fontSize = 12.sp)
+                        Spacer(Modifier.height(2.dp))
+                        Text(currentUser.phoneNumber, color = Color(0xFF1C2B36), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+
+            // --- 3. ACTION BUTTONS ---
+            Button(
+                onClick = { isEditing = true },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF005EB8)),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Edit Profile", fontWeight = FontWeight.Medium)
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Button(
+                onClick = onLogout,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD63B3B)),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+            ) {
+                Text("Log out", color = Color.White, fontWeight = FontWeight.Medium)
+            }
+
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
